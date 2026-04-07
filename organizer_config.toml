@@ -1,0 +1,39 @@
+# organizer_config.toml
+# ─────────────────────────────────────────────────────────────────
+# Config personalizada para el organizador de archivos.
+# Copia este archivo, edítalo a tu gusto y pásaselo con --config.
+#
+# Uso: python organizer.py ~/Downloads --config organizer_config.toml
+# ─────────────────────────────────────────────────────────────────
+
+# Nombre del archivo de log (se crea en la carpeta que organizas)
+log_file = "organizer.log"
+
+# ¿Qué hacer cuando ya existe un archivo con el mismo nombre?
+# Opciones: "ask" | "rename" | "skip" | "overwrite"
+conflict = "ask"
+
+# Segundos que el watcher espera antes de mover un archivo recién creado
+# (evita mover archivos que todavía se están descargando)
+watch_delay = 1.5
+
+# ─── Categorías ──────────────────────────────────────────────────
+# Puedes agregar categorías nuevas o modificar las existentes.
+# Las extensiones que pongas aquí se AGREGAN a las del script base.
+# Para sobreescribir una categoría completa, pon el mismo nombre.
+
+[categories]
+# Ejemplo: agregar una categoría custom para tus proyectos
+"Proyectos ROM" = [".gba", ".nds", ".gbc", ".gb", ".ips", ".ups", ".bps"]
+"Godot"         = [".tscn", ".gd", ".tres", ".import", ".gdextension"]
+"Saves"         = [".sav", ".save", ".bak"]
+
+# Ejemplo: mover todos los torrents a una subcarpeta específica
+"Torrents"      = [".torrent", ".magnet"]
+
+# ─── MIME Fallback ───────────────────────────────────────────────
+# Si no se reconoce por extensión, se intenta con el tipo MIME.
+# La clave puede ser un MIME exacto o un prefijo (termina en /).
+
+[mime_fallback]
+"application/x-bittorrent" = "Torrents"
