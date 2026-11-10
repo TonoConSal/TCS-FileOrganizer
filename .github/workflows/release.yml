@@ -27,7 +27,7 @@ jobs:
         run: python -m pip install pyinstaller watchdog
 
       - name: Build executable
-        run: python build.py
+        run: python -X utf8 build.py
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
@@ -52,7 +52,7 @@ jobs:
         run: python -m pip install pyinstaller watchdog
 
       - name: Build executable
-        run: python build.py
+        run: python -X utf8 build.py
 
       - name: Prepare Debian package
         run: |
