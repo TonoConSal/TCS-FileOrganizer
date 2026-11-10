@@ -1,0 +1,7 @@
+Package: tcs-fileorganizer
+Version: 2.5.0
+Architecture: amd64
+Maintainer: TonoConSal <tonoconsal@gmail.com>
+Section: utils
+Priority: optional
+Description: Desktop file organizer with automatic categorization and folder watching
