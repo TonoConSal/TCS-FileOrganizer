@@ -100,6 +100,7 @@ class OrganizerApp(tk.Tk):
         # Estado
         self._watcher_thread: threading.Thread | None = None
         self._watching = False
+        self._watcher_stop_event = threading.Event()
         self._folder = tk.StringVar()
         self._dry_run = tk.BooleanVar(value=False)
         self._conflict = tk.StringVar(value="ask")
@@ -292,9 +293,8 @@ class OrganizerApp(tk.Tk):
 
     def _toggle_watcher(self):
         if self._watching:
-            self._watching = False
-            self._watch_btn.config(text="👁  Iniciar watcher", bg="#2d4a7a")
-            self._set_status("Watcher detenido.", C["muted"])
+            self._watcher_stop_event.set()
+            self._set_status("Deteniendo watcher...", C["muted"])
             return
 
         folder = self._validate_folder()
@@ -310,23 +310,34 @@ class OrganizerApp(tk.Tk):
         config = self._get_config()
         ext_map = build_extension_map(config["categories"])
 
+        # Reiniciamos la señal antes de iniciar un nuevo watcher.
+        self._watcher_stop_event.clear()
+
         self._watching = True
         self._watch_btn.config(text="⏹  Detener watcher", bg=C["danger"])
         self._set_status("Watcher activo — monitoreando cambios...", C["success"])
 
         def task():
             try:
-                start_watcher(folder, config, ext_map, self._logger)
+                start_watcher(
+                    folder,
+                    config,
+                    ext_map,
+                    self._logger,
+                    self._watcher_stop_event
+                )
             except Exception as e:
-                self.after(0, self._set_status, f"Watcher error: {e}", C["danger"])
+                self.after(0, self._set_status,
+                           f"Watcher error: {e}", C["danger"])
             finally:
                 self._watching = False
                 self.after(0, self._watch_btn.config,
                            {"text": "👁  Iniciar watcher", "bg": "#2d4a7a"})
+                self.after(0, self._set_status,
+                           "Watcher detenido.", C["muted"])
 
         self._watcher_thread = threading.Thread(target=task, daemon=True)
         self._watcher_thread.start()
-
     def _clear_log(self):
         self._log_widget.config(state="normal")
         self._log_widget.delete("1.0", "end")
@@ -339,8 +350,6 @@ class OrganizerApp(tk.Tk):
         for widget in self.winfo_children():
             if isinstance(widget, tk.Button):
                 widget.config(state=state)
-
-
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

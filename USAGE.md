@@ -4,7 +4,7 @@
 > No requiere instalar nada. Solo descarga y abre.
 
 ---
-
+# WINDOWS 
 ## ⬇️ Descarga e instalación
 
 1. Descarga **FileOrganizer.exe** desde la sección [Releases](../../releases) de este repositorio.
@@ -56,6 +56,7 @@
 4. Listo. En la sección **Actividad** verás qué archivo fue a qué carpeta.
 
 ---
+# LINUX
 
 ## 📂 ¿Dónde van a parar mis archivos?
 
@@ -79,7 +80,7 @@ El programa crea subcarpetas automáticamente según el tipo de archivo:
 
 ## ⚙️ Opciones explicadas
 
-### Si existe el archivo (conflictos)
+### Sí existe el archivo (conflictos)
 
 Elige qué pasa cuando ya hay un archivo con el mismo nombre en la carpeta destino:
 

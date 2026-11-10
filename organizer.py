@@ -16,6 +16,7 @@ import re
 import shutil
 import sys
 import time
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -33,6 +34,8 @@ try:
     from watchdog.events import FileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
+    Observer = None
+    FileSystemEventHandler = object
     WATCHDOG_AVAILABLE = False
 
 # ── Config por defecto ────────────────────────────────────────────────────────
@@ -326,25 +329,43 @@ class OrganizerHandler(FileSystemEventHandler):
                 move_file(path, self.folder, self.config, self.ext_map, self.logger)
 
 
-def start_watcher(folder: Path, config: dict, ext_map: dict, logger: logging.Logger):
+
+def start_watcher(
+    folder: Path,
+    config: dict,
+    ext_map: dict,
+    logger: logging.Logger,
+    stop_event: threading.Event | None = None
+):
     if not WATCHDOG_AVAILABLE:
         logger.error("Watchdog no está instalado. Instálalo con: pip install watchdog")
-        sys.exit(1)
+        return
+
+    # Si no recibimos una señal externa, creamos una propia.
+    if stop_event is None:
+        stop_event = threading.Event()
 
     handler = OrganizerHandler(folder, config, ext_map, logger)
     observer = Observer()
+
     observer.schedule(handler, str(folder), recursive=False)
     observer.start()
-    logger.info(f"👁️  Watcher activo en '{folder}'. Presiona Ctrl+C para detener.")
+
+    logger.info(f"👁️ Watcher activo en '{folder}'.")
 
     try:
-        while True:
+        while not stop_event.is_set():
             handler.process_pending()
-            time.sleep(0.5)
+            stop_event.wait(0.5)
+
     except KeyboardInterrupt:
         logger.info("Watcher detenido por el usuario.")
+
+    finally:
         observer.stop()
-    observer.join()
+        observer.join()
+        logger.info("Watcher detenido.")
+
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
