@@ -24,7 +24,7 @@ def main():
     is_windows = sys.platform == "win32"
     executable_name = f"{APP_NAME}.exe" if is_windows else APP_NAME
 
-    print(f"🔨 Compilando {APP_NAME} para {sys.platform}")
+    print(f"[BUILD] Compilando {APP_NAME} para {sys.platform}")
     print("─" * 45)
 
     # Verifica PyInstaller
