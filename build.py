@@ -25,7 +25,7 @@ def main():
     executable_name = f"{APP_NAME}.exe" if is_windows else APP_NAME
 
     print(f"[BUILD] Compilando {APP_NAME} para {sys.platform}")
-    print("─" * 45)
+    print("-" * 45)
 
     # Verifica PyInstaller
     try:
@@ -59,13 +59,13 @@ def main():
     if result.returncode == 0:
         executable = HERE / "dist" / executable_name
 
-        print("\n✅ Build exitoso!")
+        print("\n[OK] Build exitoso!")
         print(f"   Ejecutable: {executable}")
-        print("\n📦 Archivos generados:")
-        print(f"   • {executable}")
-        print("   • organizer_config.toml (opcional)")
+        print("\n[INFO] Archivos generados:")
+        print(f"   - {executable}")
+        print("   - organizer_config.toml (opcional)")
     else:
-        print("\n❌ Build falló. Revisa el output arriba.")
+        print("\n[ERROR] Build falló. Revisa el output arriba.")
         sys.exit(result.returncode)
 
 
