@@ -58,19 +58,24 @@ jobs:
         run: |
           mkdir -p package/opt/tcs-fileorganizer
           mkdir -p package/usr/share/icons/hicolor/512x512/apps
-
+          mkdir -p package/usr/share/applications
           cp dist/FileOrganizer package/opt/tcs-fileorganizer/
           cp assets/icons/fileorganizer.png package/usr/share/icons/hicolor/512x512/apps/
+          cp fileorganizer.desktop package/usr/share/applications/
+
 
       - name: Build DEB
         run: |
-          dpkg-deb --build --root-owner-group package FileOrganizer_2.5.0_amd64.deb
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^Version:.*/Version: ${VERSION}/" package/DEBIAN/control
+          dpkg-deb --build --root-owner-group package "FileOrganizer_${VERSION}_amd64.deb"
+
 
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
           name: linux-installer
-          path: FileOrganizer_2.5.0_amd64.deb
+          path: FileOrganizer_*_amd64.deb
 
   publish-release:
     name: Publish GitHub Release

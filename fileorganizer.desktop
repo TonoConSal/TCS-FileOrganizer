@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=FileOrganizer
+Comment=Organize your files automatically
+Exec=/opt/tcs-fileorganizer/FileOrganizer
+Icon=/usr/share/icons/hicolor/512x512/apps/fileorganizer.png
+Terminal=false
+Categories=Utility;FileTools;

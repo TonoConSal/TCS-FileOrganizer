@@ -1,18 +1,22 @@
-# 📁 FileOrganizer — Guía de uso
+# FileOrganizer - Guía de uso
 
-> Ordena tu carpeta de Descargas automáticamente en subcarpetas por tipo de archivo.  
-> No requiere instalar nada. Solo descarga y abre.
+FileOrganizer es una herramienta de escritorio que permite organizar archivos automáticamente según su tipo. También incluye un modo de vigilancia que detecta archivos nuevos y los clasifica sin necesidad de intervenir manualmente.
 
----
-# WINDOWS 
-## ⬇️ Descarga e instalación
+La aplicación cuenta con una interfaz gráfica para facilitar su uso y está disponible para Windows y distribuciones Linux compatibles.
 
-1. Descarga **FileOrganizer.exe** desde la sección [Releases](../../releases) de este repositorio.
-2. Guárdalo donde quieras (Escritorio, Documentos, etc.).
-3. Haz doble clic para abrirlo. No necesitas instalar nada más.
+## Características principales
 
-> **Windows puede mostrar una advertencia de seguridad** la primera vez.  
-> Haz clic en **"Más información"** → **"Ejecutar de todas formas"** para continuar.
+- Organización automática de archivos por categoría.
+- Interfaz gráfica sencilla.
+- Modo de vigilancia para organizar archivos nuevos automáticamente.
+- Configuración personalizable mediante archivos TOML o JSON.
+- Registro de operaciones para consultar los cambios realizados.
+
+## Descargas
+
+Puedes encontrar las versiones disponibles en la sección de [Releases de GitHub](https://github.com/TonoConSal/TCS-FileOrganizer/releases).
+
+Selecciona el archivo correspondiente a tu sistema operativo.
 
 ---
 
@@ -20,7 +24,7 @@
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  📁  File Organizer                        v2.0 │
+│  📁  File Organizer                        v2.5 │
 ├─────────────────────────────────────────────────┤
 │  CARPETA A ORGANIZAR                            │
 │  [ C:\Users\...\Downloads        ] [Examinar]   │
@@ -46,36 +50,79 @@
 
 ---
 
-## 🚀 Uso básico (paso a paso)
+## 🚀 Instalación y primeros pasos
 
-### Organizar una carpeta de una sola vez
+### 🪟 Windows
 
-1. Abre **FileOrganizer.exe**.
-2. En **"Carpeta a organizar"**, haz clic en **Examinar** y selecciona tu carpeta de Descargas (o cualquier otra).
-3. Haz clic en **▶ Organizar ahora**.
-4. Listo. En la sección **Actividad** verás qué archivo fue a qué carpeta.
+1. Entra a la sección de [Releases](https://github.com/TonoConSal/TCS-FileOrganizer/releases) del repositorio.
+2. Descarga el archivo `FileOrganizer.exe` de la versión que quieras instalar.
+3. Ejecuta el archivo descargado.
+4. Si Windows muestra una advertencia de seguridad, revisa que hayas descargado el ejecutable desde el repositorio oficial antes de permitir su ejecución.
+
+No necesitas instalar Python ni dependencias adicionales.
+
+### 🐧 Linux (Ubuntu, Debian y Linux Mint)
+
+FileOrganizer también está disponible como paquete `.deb` para sistemas Linux de arquitectura **AMD64 (x86_64)**.
+
+**Instalación mediante interfaz gráfica:**
+
+1. Entra a [Releases](https://github.com/TonoConSal/TCS-FileOrganizer/releases).
+2. Descarga `FileOrganizer_2.5.0_amd64.deb`.
+3. Abre el archivo descargado con el instalador de paquetes de tu distribución.
+4. Haz clic en **Instalar** y espera a que termine el proceso.
+5. Busca **FileOrganizer** en el menú de aplicaciones y ábrelo.
+
+**Instalación desde la terminal:**
+
+También puedes instalarlo ejecutando el siguiente comando desde la carpeta donde descargaste el paquete:
+
+```bash
+sudo apt install ./FileOrganizer_2.5.0_amd64.deb
+```
+
+Una vez instalado, podrás iniciar FileOrganizer desde el menú de aplicaciones.
+
+No necesitas instalar Python ni las dependencias del proyecto por separado.
+
+### 📂 Organizar una carpeta
+
+Una vez abierta la aplicación, sigue estos pasos:
+
+1. En **Carpeta a organizar**, haz clic en **Examinar** y selecciona la carpeta que deseas organizar.
+2. Si utilizas una configuración personalizada, selecciónala en el campo correspondiente. Este paso es opcional.
+3. Ajusta las opciones según tus preferencias.
+4. Haz clic en **Organizar ahora**.
+5. Consulta los resultados en la sección **Actividad**.
+
+¡Listo! FileOrganizer clasificará los archivos en subcarpetas según su tipo.
 
 ---
-# LINUX
-
 ## 📂 ¿Dónde van a parar mis archivos?
 
-El programa crea subcarpetas automáticamente según el tipo de archivo:
+FileOrganizer crea subcarpetas automáticamente según el tipo de archivo detectado.
 
-| Subcarpeta          | Tipos de archivo                              |
-|---------------------|-----------------------------------------------|
-| Imágenes            | .jpg, .png, .gif, .webp, .heic, .svg, ...    |
-| Videos              | .mp4, .mkv, .avi, .mov, .webm, ...           |
-| Audio               | .mp3, .flac, .wav, .ogg, .m4a, ...           |
-| Documentos          | .pdf, .docx, .txt, .md, ...                  |
-| Hojas de cálculo    | .xlsx, .csv, .ods, ...                        |
-| Código              | .py, .js, .html, .json, .yaml, ...           |
-| Ejecutables         | .exe, .msi, .apk, ...                        |
-| Comprimidos         | .zip, .rar, .7z, .tar.gz, ...                |
-| Diseño              | .psd, .ai, .fig, .sketch, ...                |
-| eBooks              | .epub, .mobi, .cbr, ...                      |
-| Otros               | Todo lo que no encaje en ninguna categoría    |
+| Subcarpeta | Extensiones reconocidas |
+|---|---|
+| Imágenes | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.svg`, `.tiff`, `.ico`, `.heic` |
+| Videos | `.mp4`, `.mkv`, `.avi`, `.mov`, `.wmv`, `.flv`, `.webm`, `.m4v`, `.3gp` |
+| Audio | `.mp3`, `.wav`, `.flac`, `.aac`, `.ogg`, `.wma`, `.m4a`, `.opus` |
+| Documentos | `.pdf`, `.doc`, `.docx`, `.odt`, `.rtf`, `.txt`, `.md`, `.tex` |
+| Hojas de cálculo | `.xls`, `.xlsx`, `.ods`, `.csv`, `.tsv` |
+| Presentaciones | `.ppt`, `.pptx`, `.odp` |
+| Código | `.py`, `.js`, `.ts`, `.html`, `.css`, `.c`, `.cpp`, `.h`, `.java`, `.cs`, `.go`, `.rs`, `.rb`, `.php`, `.sh`, `.bat`, `.ps1`, `.json`, `.xml`, `.yaml`, `.yml`, `.toml`, `.ini`, `.cfg` |
+| Ejecutables | `.exe`, `.msi`, `.apk`, `.dmg`, `.deb`, `.rpm`, `.AppImage` |
+| Comprimidos | `.zip`, `.rar`, `.7z`, `.tar`, `.gz`, `.bz2`, `.xz`, `.tar.gz`, `.tar.bz2` |
+| Fuentes | `.ttf`, `.otf`, `.woff`, `.woff2` |
+| Torrents | `.torrent` |
+| Diseño | `.psd`, `.ai`, `.xd`, `.fig`, `.sketch`, `.indd` |
+| 3D | `.obj`, `.fbx`, `.stl`, `.blend`, `.3ds`, `.dae` |
+| Bases de datos | `.db`, `.sqlite`, `.sql`, `.mdb` |
+| eBooks | `.epub`, `.mobi`, `.azw`, `.azw3`, `.cbr`, `.cbz` |
+| ISO | `.iso`, `.img`, `.bin`, `.cue` |
+| Otros | Archivos que no coincidan con ninguna categoría conocida |
 
+**Nota:** El programa también utiliza la detección MIME como alternativa cuando una extensión no coincide con las categorías configuradas.
 ---
 
 ## ⚙️ Opciones explicadas
@@ -95,7 +142,7 @@ Elige qué pasa cuando ya hay un archivo con el mismo nombre en la carpeta desti
 
 ### 👁 Watcher — organización en tiempo real
 
-Cuando activas el **watcher**, el programa se queda corriendo en segundo plano y organiza automáticamente cada archivo nuevo que aparezca en la carpeta — ideal si lo apuntas a tu carpeta de Descargas y lo dejas toda la sesión.
+Cuando activas el **watcher**, el programa permanece abierto y supervisa la carpeta seleccionada. Cada archivo nuevo que aparezca será organizado automáticamente.
 
 - Haz clic en **👁 Iniciar watcher** para activarlo.
 - El botón se pone **rojo** mientras está activo.
@@ -113,41 +160,58 @@ Marca esta casilla si quieres **ver qué haría el programa sin mover nada**. Ú
 
 ## 📋 El log de actividad
 
-La sección **Actividad** muestra en tiempo real cada acción:
+La sección **Actividad** muestra en tiempo real las operaciones realizadas por FileOrganizer.
 
-- 🟢 Líneas blancas — archivo movido exitosamente
-- 🟡 Líneas amarillas — advertencias (ej. archivo saltado)
-- 🔴 Líneas rojas — errores
+Los mensajes utilizan diferentes colores según su nivel:
 
-También se guarda un archivo `organizer.log` dentro de la carpeta que organizaste, por si quieres revisarlo después.
+- ⚪ Blanco — información general y operaciones completadas.
+- 🟡 Amarillo — advertencias, como archivos que fueron saltados.
+- 🔴 Rojo — errores durante la ejecución.
+- ⚫ Gris — información de depuración.
+
+Puedes utilizar el botón **Limpiar log** para borrar los mensajes visibles en la interfaz.
+
+**Nota:** La versión con interfaz gráfica muestra el registro directamente en la aplicación. El modo de línea de comandos (CLI) también puede generar un archivo `organizer.log` dentro de la carpeta organizada.
 
 ---
 
-## 🛠 Config personalizada (avanzado)
+## 🛠️ Configuración personalizada (avanzado)
 
-Si quieres definir tus propias categorías o cambiar el comportamiento por defecto, puedes usar un archivo de configuración `.toml`. Descárgalo desde el repositorio (`organizer_config.toml`), edítalo con el Bloc de notas, y cárgalo con el botón **Examinar** en el campo de config.
+FileOrganizer permite personalizar su comportamiento mediante archivos de configuración `.toml` o `.json`.
+
+Estos archivos permiten modificar las categorías, agregar nuevas extensiones y ajustar opciones como el comportamiento ante conflictos entre archivos.
+
+Puedes encontrar archivos de ejemplo en el repositorio. Descarga el formato que prefieras, edítalo con un editor de texto y cárgalo mediante el botón **Examinar** en el campo de configuración de la aplicación.
+
+Si no cargas un archivo personalizado, FileOrganizer utilizará su configuración predeterminada.
 
 ---
 
 ## ❓ Preguntas frecuentes
 
 **¿Borra archivos?**  
-No. Solo los mueve a subcarpetas dentro de la misma carpeta que seleccionaste.
+No. FileOrganizer mueve los archivos a subcarpetas dentro de la carpeta seleccionada. Sin embargo, la opción **Sobrescribir** puede reemplazar archivos existentes si se produce un conflicto.
 
 **¿Funciona en otras carpetas además de Descargas?**  
-Sí, cualquier carpeta funciona. Solo selecciónala con el botón **Examinar**.
+Sí. Puedes seleccionar cualquier carpeta mediante el botón **Examinar**.
 
 **¿Organiza subcarpetas también?**  
-No, solo los archivos que están directamente en la carpeta seleccionada.
+No. Actualmente solo organiza los archivos que están directamente dentro de la carpeta seleccionada.
 
 **¿Qué pasa si cierro el programa con el watcher activo?**  
-El watcher se detiene automáticamente al cerrar la ventana.
+El watcher se detiene automáticamente al cerrar la aplicación.
 
 **¿Tengo que volver a configurarlo cada vez que lo abro?**  
-Sí por ahora, no guarda la configuración entre sesiones. Próximamente.
+Sí. La aplicación no guarda la configuración entre sesiones, por lo que tendrás que seleccionar nuevamente la carpeta que quieres organizar y cargar tu archivo TOML o JSON si utilizas una configuración personalizada.
+
+**¿Necesito instalar Python o alguna dependencia?**  
+No. Las versiones compiladas para Windows y Linux incluyen lo necesario para ejecutar la aplicación.
+
+**¿Puedo recuperar un archivo después de organizarlo?**  
+Sí. Los archivos se mueven a subcarpetas dentro de la carpeta seleccionada. Puedes moverlos manualmente a su ubicación anterior si lo necesitas.
 
 ---
 
 ## 🐛 Reportar un problema
 
-¿Algo no funcionó como esperabas? Abre un [Issue](../../issues) en este repositorio describiendo qué pasó y en qué tipo de archivo ocurrió.
+¿Algo no funcionó como esperabas? Abre un [Issue]([Issues](https://github.com/TonoConSal/TCS-FileOrganizer/issues)) en este repositorio describiendo qué pasó y en qué tipo de archivo ocurrió.

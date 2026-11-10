@@ -118,7 +118,7 @@ class OrganizerApp(tk.Tk):
         header.pack_propagate(False)
         tk.Label(header, text="📁  File Organizer", bg=C["surface"],
                  fg=C["text"], font=FONT_TITLE).pack(side="left", padx=20, pady=14)
-        tk.Label(header, text="v2.0", bg=C["surface"],
+        tk.Label(header, text="v2.5", bg=C["surface"],
                  fg=C["muted"], font=FONT_LABEL).pack(side="right", padx=20)
 
         # ── Carpeta objetivo
@@ -163,7 +163,7 @@ class OrganizerApp(tk.Tk):
 
         conflict_frame = tk.Frame(opts, bg=C["bg"])
         conflict_frame.grid(row=0, column=1, sticky="w", padx=(12, 0))
-        for val, lbl in [("ask", "Preguntar"), ("rename", "Renombrar"), ("skip", "Saltar"), ("overwrite", "Sobreescribir")]:
+        for val, lbl in [("ask", "Preguntar"), ("rename", "Renombrar"), ("skip", "Saltar"), ("overwrite", "Sobrescribir")]:
             tk.Radiobutton(
                 conflict_frame, text=lbl, variable=self._conflict, value=val,
                 bg=C["bg"], fg=C["text"], selectcolor=C["surface"],
