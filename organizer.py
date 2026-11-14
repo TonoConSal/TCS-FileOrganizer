@@ -12,7 +12,6 @@ import argparse
 import json
 import logging
 import mimetypes
-import re
 import shutil
 import sys
 import time
@@ -212,17 +211,90 @@ def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger) ->
                 sys.exit(0)
             else:
                 print("   Opción no válida, intenta de nuevo.")
-    return dst
+    raise ValueError(
+        f"Modo de conflicto no válido: {mode!r} "
+        "(usa ask, rename, skip u overwrite)"
+    )
+
+
+VALID_CONFLICT_MODES = frozenset({"ask", "rename", "skip", "overwrite"})
+
+
+def default_exclude(
+    folder: Path, config: dict, config_path: Path | None = None
+) -> frozenset[Path]:
+    """Rutas propias que nunca deben moverse, aunque estén en la carpeta
+    objetivo: el log, la config y los scripts del programa (CLI y GUI).
+
+    La CLI y la GUI deben usar este mismo helper, para que el arreglo no
+    quede solo en un lado.
+
+    Si la config no trae "log_file" (o viene vacío / no es texto), no se
+    excluye ningún log y no se lanza KeyError: se excluyen solo los
+    scripts y la config. Los puntos de entrada deben validar la config
+    con validate_config() antes de llegar aquí, para que ese caso falle
+    rápido con un mensaje claro en vez de seguir sin log excluido.
+    """
+    exclude = {
+        Path(__file__).resolve(),
+        (Path(__file__).resolve().parent / "organizer_gui.py").resolve(),
+    }
+    log_file = config.get("log_file") if isinstance(config, dict) else None
+    if isinstance(log_file, str) and log_file.strip():
+        exclude.add((folder / log_file).resolve())
+    if config_path:
+        exclude.add(config_path.resolve())
+    return frozenset(exclude)
+
+
+def validate_config(config: dict) -> None:
+    """Valida la config ya cargada; lanza ValueError si algo no es usable."""
+    if not isinstance(config, dict):
+        raise ValueError("La configuración debe ser un dict.")
+    conflict = config.get("conflict")
+    # Comprobar el tipo antes de buscar en el frozenset: un valor no
+    # hashable (lista, dict, ...) lanzaría TypeError en lugar del
+    # ValueError esperado.
+    if not isinstance(conflict, str) or conflict not in VALID_CONFLICT_MODES:
+        raise ValueError(
+            f"Modo de conflicto no válido: {conflict!r} "
+            "(usa ask, rename, skip u overwrite)"
+        )
+    log_file = config.get("log_file")
+    if not isinstance(log_file, str) or not log_file.strip():
+        raise ValueError(
+            "La configuración debe incluir 'log_file' como texto no vacío."
+        )
+
+
+# Únicas extensiones compuestas que se reconocen como una sola.
+# Cualquier otro nombre con varios puntos se trata con su último
+# sufijo, para no romperlo: "my.file.pdf" -> "my.file_1.pdf".
+KNOWN_COMPOUND_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz")
+
+
+def _split_stem_suffix(path: Path) -> tuple[str, str]:
+    """Separa stem y sufijo, respetando solo las compuestas conocidas."""
+    name_lower = path.name.lower()
+    for compound in KNOWN_COMPOUND_SUFFIXES:
+        if name_lower.endswith(compound):
+            return path.name[: -len(compound)], path.name[-len(compound):]
+    return path.stem, path.suffix
 
 
 def unique_path(dst: Path) -> Path:
-    """Genera un nombre único agregando _1, _2, etc."""
+    """Genera un nombre único agregando _1, _2, etc.
+
+    Respeta extensiones compuestas conocidas (.tar.gz -> archive_1.tar.gz)
+    y conserva el nombre tal cual: no se interpreta ningún sufijo "_N"
+    como contador generado, porque puede ser parte legítima del nombre
+    original. Así "foto_1.jpg" -> "foto_1_1.jpg" y
+    "report_2024.pdf" -> "report_2024_1.pdf".
+    """
+    stem, suffix = _split_stem_suffix(dst)
     counter = 1
-    stem = dst.stem
-    # Limpia sufijos numéricos anteriores para evitar archivo_1_1_1
-    stem = re.sub(r"_\d+$", "", stem)
     while dst.exists():
-        dst = dst.with_name(f"{stem}_{counter}{dst.suffix}")
+        dst = dst.with_name(f"{stem}_{counter}{suffix}")
         counter += 1
     return dst
 
@@ -277,10 +349,20 @@ def organize_folder(
     ext_map: dict,
     logger: logging.Logger,
     dry_run: bool = False,
+    exclude: frozenset[Path] | None = None,
 ) -> tuple[int, int]:
-    """Organiza todos los archivos en la carpeta (no recursivo). Retorna (movidos, saltados)."""
+    """Organiza todos los archivos en la carpeta (no recursivo). Retorna (movidos, saltados).
+
+    `exclude` son rutas (resueltas) que nunca se mueven: el propio log, el
+    archivo de config y los scripts del programa, si están en la carpeta.
+    """
     moved = skipped = 0
-    files = [f for f in folder.iterdir() if f.is_file()]
+    excluded = {Path(p).resolve() for p in exclude} if exclude else set()
+    files = [
+        f
+        for f in folder.iterdir()
+        if f.is_file() and f.resolve() not in excluded
+    ]
 
     if not files:
         logger.info("No hay archivos que organizar.")
@@ -302,12 +384,14 @@ def organize_folder(
 # ── Watcher ───────────────────────────────────────────────────────────────────
 
 class OrganizerHandler(FileSystemEventHandler):
-    def __init__(self, folder: Path, config: dict, ext_map: dict, logger: logging.Logger):
+    def __init__(self, folder: Path, config: dict, ext_map: dict, logger: logging.Logger,
+                 exclude: frozenset[Path] | None = None):
         self.folder = folder
         self.config = config
         self.ext_map = ext_map
         self.logger = logger
         self._pending: dict[str, float] = {}
+        self._excluded = {Path(p).resolve() for p in exclude} if exclude else set()
 
     def on_created(self, event):
         if event.is_directory:
@@ -325,6 +409,8 @@ class OrganizerHandler(FileSystemEventHandler):
         for p in ready:
             path = Path(p)
             del self._pending[p]
+            if path.resolve() in self._excluded:
+                continue
             if path.exists() and path.is_file():
                 move_file(path, self.folder, self.config, self.ext_map, self.logger)
 
@@ -335,7 +421,8 @@ def start_watcher(
     config: dict,
     ext_map: dict,
     logger: logging.Logger,
-    stop_event: threading.Event | None = None
+    stop_event: threading.Event | None = None,
+    exclude: frozenset[Path] | None = None,
 ):
     if not WATCHDOG_AVAILABLE:
         logger.error("Watchdog no está instalado. Instálalo con: pip install watchdog")
@@ -345,7 +432,7 @@ def start_watcher(
     if stop_event is None:
         stop_event = threading.Event()
 
-    handler = OrganizerHandler(folder, config, ext_map, logger)
+    handler = OrganizerHandler(folder, config, ext_map, logger, exclude=exclude)
     observer = Observer()
 
     observer.schedule(handler, str(folder), recursive=False)
@@ -414,9 +501,18 @@ def main():
         sys.exit(1)
 
     config = load_config(args.config)
+    try:
+        validate_config(config)
+    except ValueError as exc:
+        print(f"[!] Config no válida: {exc}")
+        sys.exit(1)
 
     log_path = folder / config["log_file"]
     logger = setup_logging(log_path)
+
+    # Archivos propios que nunca deben moverse, aunque estén en la carpeta
+    # objetivo: el log, la config y los scripts del programa.
+    exclude = default_exclude(folder, config, args.config)
 
     logger.info(f"=== Organizer iniciado {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
     logger.info(f"Carpeta objetivo: {folder}")
@@ -427,11 +523,11 @@ def main():
 
     if args.watch:
         # En modo watch, primero organiza lo existente y luego se queda escuchando
-        organize_folder(folder, config, ext_map, logger, dry_run=args.dry_run)
+        organize_folder(folder, config, ext_map, logger, dry_run=args.dry_run, exclude=exclude)
         if not args.dry_run:
-            start_watcher(folder, config, ext_map, logger)
+            start_watcher(folder, config, ext_map, logger, exclude=exclude)
     else:
-        organize_folder(folder, config, ext_map, logger, dry_run=args.dry_run)
+        organize_folder(folder, config, ext_map, logger, dry_run=args.dry_run, exclude=exclude)
 
 
 if __name__ == "__main__":
