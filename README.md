@@ -83,11 +83,15 @@ El paquete está destinado a sistemas de arquitectura AMD64 (x86_64).
 | Modo simulación | Muestra qué archivos se organizarían sin moverlos. |
 | Watcher | Supervisa la carpeta y organiza los archivos nuevos automáticamente. |
 
+> **Nota:** la opción **Preguntar** solo funciona si la GUI se lanzó desde una terminal. En el `.exe` (sin consola), un conflicto con **Preguntar** detiene la organización con un error; en ese caso usa **Renombrar**. El watcher nunca pregunta: si el modo es **Preguntar**, usa **Renombrar** automáticamente (ver la sección de CLI más abajo).
+
 ---
 
 ## 💻 Uso desde la terminal (CLI)
 
 También puedes utilizar FileOrganizer directamente desde Python.
+
+La CLI es interactiva: si no le pasas una carpeta, te pregunta cuál organizar y qué modo de conflicto usar antes de mover nada. También pregunta cuando la lanzas con el botón Run de un IDE.
 
 ### Requisitos
 
@@ -107,18 +111,44 @@ Para Python anterior a 3.11:
 pip install tomli
 ```
 
+### Preguntas al inicio
+
+Al arrancar, la CLI muestra estas dos preguntas:
+
+```bash
+Carpeta a organizar [/home/fer/Descargas]: /tmp/mi-carpeta
+Modo de conflicto ['ask', 'overwrite', 'rename', 'skip'] [ask]: rename
+```
+
+- **Carpeta:** Enter acepta la sugerida (`~/Descargas` si existe, si no `~/Downloads`). Si escribes una ruta que no existe, vuelve a preguntar.
+- **Modo de conflicto:** Enter acepta el de la configuración. Si escribes un modo no válido, vuelve a preguntar.
+- **Cancelar:** con Ctrl+C (o si no hay de dónde leer la respuesta) muestra `Operación cancelada` y sale sin organizar nada.
+- Si le pasas la carpeta como argumento, ya no pregunta por ella. Con `--conflict` fija el modo sin preguntar, y con `--no-prompt` no pregunta nada: usa Descargas y el modo de la configuración (para scripts y automatización).
+
 ### Ejemplos
 
-Organizar la carpeta Descargas:
+Organizar la carpeta Descargas (pregunta la carpeta y el modo antes de organizar):
 
 ```bash
 python organizer.py
 ```
 
-Especificar una carpeta:
+Especificar una carpeta (solo pregunta el modo de conflicto):
 
 ```bash
 python organizer.py ~/Descargas
+```
+
+Fijar el modo de conflicto sin preguntar:
+
+```bash
+python organizer.py --conflict rename
+```
+
+No preguntar nada, para scripts y automatización:
+
+```bash
+python organizer.py --no-prompt
 ```
 
 Simular la organización sin mover archivos:
@@ -144,6 +174,10 @@ Combinar opciones:
 ```bash
 python organizer.py ~/Descargas --watch --config mi_config.toml
 ```
+
+> **Watcher y modo Preguntar:** el watcher es desatendido y no puede preguntar. Si el modo de conflicto es `ask`, el watcher usa `rename` automáticamente (nunca sobrescribe nada) y lo avisa en el log. Esto aplica igual a la CLI (`--watch`) y a la GUI.
+>
+> Con `--watch --dry-run` solo se simula la organización inicial y no se inicia el watcher.
 
 ---
 
@@ -213,7 +247,9 @@ La interfaz gráfica muestra las operaciones en tiempo real mediante diferentes 
 - Errores.
 - Información de depuración.
 
-La versión CLI también genera un archivo `organizer.log` dentro de la carpeta organizada.
+La versión CLI genera un archivo `organizer.log` dentro de la carpeta organizada, con líneas como `MOVIDO  foto.jpg  →  Imágenes/foto_1.jpg` y `CONFLICTO → foto.jpg ya existe, renombrado a foto_1.jpg`. Ese log nunca se mueve a otra categoría, aunque esté dentro de la carpeta que organizas.
+
+La GUI **no guarda el log en archivo**: solo lo muestra en la sección **Actividad** de la ventana. Si ya existe un `organizer.log` en la carpeta, la GUI tampoco lo mueve.
 
 ---
 
