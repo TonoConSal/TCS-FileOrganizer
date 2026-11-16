@@ -98,6 +98,100 @@ Una vez abierta la aplicación, sigue estos pasos:
 ¡Listo! FileOrganizer clasificará los archivos en subcarpetas según su tipo.
 
 ---
+## 💻 Uso desde la terminal (CLI)
+
+También puedes usar FileOrganizer desde Python con `organizer.py`, sin abrir la interfaz gráfica.
+
+### Requisitos
+
+- Python 3.11 o superior.
+- `watchdog` para el modo de vigilancia (`pip install watchdog`).
+- `tomli` si usas Python anterior a 3.11 y cargas archivos TOML.
+
+### Preguntas al inicio
+
+Si no le pasas una carpeta, la CLI pregunta antes de mover nada:
+
+```bash
+Carpeta a organizar [~/Descargas]: /tmp/mi-carpeta
+Modo de conflicto ['ask', 'overwrite', 'rename', 'skip'] [ask]: rename
+```
+
+- **Carpeta:** Enter acepta la sugerida (`~/Descargas` si existe, si no `~/Downloads`). Si escribes una ruta que no existe, vuelve a preguntar.
+- **Modo de conflicto:** Enter acepta el de la configuración. Si escribes un modo no válido, vuelve a preguntar.
+- **Cancelar:** con Ctrl+C (o si no hay de dónde leer la respuesta) muestra `Operación cancelada` y sale sin organizar nada.
+- Si le pasas la carpeta como argumento, ya no pregunta por ella; si usas `--conflict`, tampoco pregunta el modo; con `--no-prompt` no pregunta nada.
+
+### Ejemplos
+
+Organizar la carpeta Descargas (pregunta la carpeta y el modo antes de organizar):
+
+```bash
+python organizer.py
+```
+
+Especificar una carpeta (solo pregunta el modo de conflicto):
+
+```bash
+python organizer.py ~/Descargas
+```
+
+Fijar el modo de conflicto sin preguntar:
+
+```bash
+python organizer.py --conflict rename
+```
+
+No preguntar nada, para scripts y automatización:
+
+```bash
+python organizer.py --no-prompt
+```
+
+Simular la organización sin mover archivos:
+
+```bash
+python organizer.py --dry-run
+```
+
+Activar el modo de vigilancia:
+
+```bash
+python organizer.py --watch
+```
+
+Utilizar una configuración personalizada:
+
+```bash
+python organizer.py --config organizer_config.toml
+```
+
+Combinar opciones:
+
+```bash
+python organizer.py ~/Descargas --watch --config mi_config.toml
+```
+
+### Modos de conflicto en la CLI
+
+| Modo | Qué hace |
+|---|---|
+| `ask` | Pregunta caso por caso: `[r]` Renombrar, `[o]` Sobreescribir, `[s]` Saltar, `[q]` Salir. Una respuesta no válida vuelve a preguntar. |
+| `rename` | Guarda el nuevo como `archivo_1.pdf`, `archivo_2.pdf`, etc. Nunca sobrescribe. |
+| `skip` | Lo ignora y lo deja donde está. |
+| `overwrite` | Reemplaza el archivo existente sin preguntar. |
+
+El modo también se puede fijar en la configuración (`conflict = "rename"`) o con `--conflict`. Si la configuración trae un modo no válido, la CLI se niega a organizar y muestra `Config no válida`.
+
+### Watcher en la CLI
+
+`python organizer.py --watch` primero organiza lo que ya hay en la carpeta y luego se queda vigilando los archivos nuevos. Espera un momento antes de mover cada archivo nuevo para asegurarse de que la descarga esté completa.
+
+> El watcher no puede preguntar: si el modo de conflicto es `ask`, usa `rename` automáticamente y lo avisa en el log. La configuración original no cambia; organizar una sola vez sigue preguntando normal.
+
+Con `--watch --dry-run` solo simula la organización inicial y no inicia el watcher.
+
+---
 ## 📂 ¿Dónde van a parar mis archivos?
 
 FileOrganizer crea subcarpetas automáticamente según el tipo de archivo detectado.
@@ -138,6 +232,8 @@ Elige qué pasa cuando ya hay un archivo con el mismo nombre en la carpeta desti
 | **Saltar**     | Lo ignora y lo deja donde está                                   |
 | **Sobreescribir** | Reemplaza el archivo existente sin preguntar                 |
 
+> **En la GUI:** la opción **Preguntar** solo funciona si la aplicación se lanzó desde una terminal. En el `.exe` (sin consola), un conflicto con **Preguntar** detiene la organización con un error; usa **Renombrar** en ese caso. En la CLI, **Preguntar** funciona normal porque sí hay terminal.
+
 ---
 
 ### 👁 Watcher — organización en tiempo real
@@ -149,6 +245,10 @@ Cuando activas el **watcher**, el programa permanece abierto y supervisa la carp
 - Haz clic en **⏹ Detener watcher** para apagarlo.
 
 > El watcher espera un momento antes de mover cada archivo para asegurarse de que la descarga esté completa.
+
+> Si el modo es **Preguntar**, el watcher usa **Renombrar** automáticamente, porque no hay nadie para contestar en ese momento; lo avisa en el log y nunca sobrescribe nada. Esto aplica igual a la GUI y a la CLI (`--watch`).
+
+> En la GUI, el modo simulación no aplica al watcher: si lo activas, mueve archivos de verdad aunque la casilla esté marcada. En la CLI, `--watch --dry-run` solo simula y no inicia el watcher.
 
 ---
 
@@ -171,7 +271,7 @@ Los mensajes utilizan diferentes colores según su nivel:
 
 Puedes utilizar el botón **Limpiar log** para borrar los mensajes visibles en la interfaz.
 
-**Nota:** La versión con interfaz gráfica muestra el registro directamente en la aplicación. El modo de línea de comandos (CLI) también puede generar un archivo `organizer.log` dentro de la carpeta organizada.
+**Nota:** la GUI **no guarda el log en archivo**: solo lo muestra en la sección **Actividad** de la ventana, y al cerrar la aplicación ese registro se pierde. La CLI sí genera un archivo `organizer.log` dentro de la carpeta organizada, con las mismas líneas de `MOVIDO` y `CONFLICTO` que se ven en pantalla.
 
 ---
 
