@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -19,6 +20,8 @@ from organizer import (  # noqa: E402
     build_extension_map,
     default_exclude,
     load_config,
+    OrganizerHandler,
+    _watcher_config,
     organize_folder,
     prompt_conflict_mode,
     prompt_folder,
@@ -355,6 +358,80 @@ class CliPromptTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotIn("Carpeta a organizar", result.stdout)
             self.assertTrue((downloads / "Documentos" / "decoy.txt").exists())
+
+
+class WatcherConfigTests(unittest.TestCase):
+    def _capturing_logger(self):
+        records = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        logger = logging.getLogger("test-watcher-config")
+        logger.setLevel(logging.DEBUG)
+        logger.handlers = [_Capture()]
+        logger.propagate = False
+        return logger, records
+
+    def test_watcher_replaces_ask_with_rename(self):
+        config = load_config(None)
+        config["conflict"] = "ask"
+        logger, records = self._capturing_logger()
+        watcher_config = _watcher_config(config, logger)
+        self.assertEqual(watcher_config["conflict"], "rename")
+        # La config original no se toca: 'ask' sigue para una sola vez
+        self.assertEqual(config["conflict"], "ask")
+        self.assertTrue(any("rename" in r for r in records))
+
+    def test_watcher_keeps_other_modes(self):
+        for mode in ("rename", "skip", "overwrite"):
+            config = load_config(None)
+            config["conflict"] = mode
+            logger, records = self._capturing_logger()
+            watcher_config = _watcher_config(config, logger)
+            self.assertEqual(watcher_config["conflict"], mode)
+            self.assertFalse(any("rename" in r for r in records))
+
+    def test_watcher_handler_renames_without_asking(self):
+        """Con la config del watcher, un conflicto no llama a input().
+
+        Antes, con 'ask', process_pending() moría con EOFError en
+        la GUI/.exe (sin consola) y el watcher se detenía entero.
+        """
+        records = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        logger = logging.getLogger("test-watcher-handler")
+        logger.setLevel(logging.DEBUG)
+        logger.handlers = [_Capture()]
+        logger.propagate = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Imágenes").mkdir()
+            (folder / "Imágenes" / "foto.jpg").write_text("vieja")
+            src = folder / "foto.jpg"
+            src.write_text("nueva")
+            config = load_config(None)
+            config["conflict"] = "ask"
+            ext_map = build_extension_map(config["categories"])
+            handler = OrganizerHandler(
+                folder, _watcher_config(config, logger), ext_map, logger
+            )
+            handler._pending[str(src)] = time.time() - 10
+            # Si algo intentara preguntar, esto lo delataría con EOFError
+            with mock.patch("organizer.input", side_effect=EOFError):
+                handler.process_pending()
+            self.assertTrue((folder / "Imágenes" / "foto_1.jpg").exists())
+            self.assertFalse(src.exists())
+            self.assertTrue(
+                any("CONFLICTO" in r and "foto_1.jpg" in r for r in records),
+                f"falta el log de conflicto: {records}",
+            )
 
 
 if __name__ == "__main__":

@@ -425,6 +425,26 @@ class OrganizerHandler(FileSystemEventHandler):
 
 
 
+def _watcher_config(config: dict, logger: logging.Logger) -> dict:
+    """Config efectiva del watcher.
+
+    El modo 'ask' no sirve en un watcher: es desatendido, corre en
+    un hilo secundario y en la GUI/.exe ni siquiera hay consola, así
+    que su input() muere con EOFError y detiene el watcher entero.
+    En ese caso se usa 'rename' (nunca se sobrescribe nada) y se
+    avisa en el log. La config original no se toca: el modo 'ask'
+    sigue valiendo para organizar una sola vez.
+    """
+    watcher_config = dict(config)
+    if watcher_config.get("conflict") == "ask":
+        watcher_config["conflict"] = "rename"
+        logger.warning(
+            "Watcher: el modo 'ask' no funciona sin consola; "
+            "usando 'rename' para no detener el watcher."
+        )
+    return watcher_config
+
+
 def start_watcher(
     folder: Path,
     config: dict,
@@ -441,7 +461,9 @@ def start_watcher(
     if stop_event is None:
         stop_event = threading.Event()
 
-    handler = OrganizerHandler(folder, config, ext_map, logger, exclude=exclude)
+    handler = OrganizerHandler(
+        folder, _watcher_config(config, logger), ext_map, logger, exclude=exclude
+    )
     observer = Observer()
 
     observer.schedule(handler, str(folder), recursive=False)
