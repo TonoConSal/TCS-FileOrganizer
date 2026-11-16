@@ -42,6 +42,12 @@ except ImportError:
     FileSystemEventHandler = object
     WATCHDOG_AVAILABLE = False
 
+# ── Versión ───────────────────────────────────────────────────────────────────
+# Única fuente de la versión: la GUI la muestra como "v{__version__}".
+# Al hacer un release, el tag (vX.Y.Z) debe coincidir con este valor.
+__version__ = "2.5.1"
+
+
 # ── Config por defecto ────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     "log_file": "organizer.log",

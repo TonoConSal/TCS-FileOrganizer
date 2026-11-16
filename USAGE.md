@@ -24,7 +24,7 @@ Selecciona el archivo correspondiente a tu sistema operativo.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  📁  File Organizer                        v2.5 │
+│  📁  File Organizer                      v2.5.1 │
 ├─────────────────────────────────────────────────┤
 │  CARPETA A ORGANIZAR                            │
 │  [ C:\Users\...\Downloads        ] [Examinar]   │
