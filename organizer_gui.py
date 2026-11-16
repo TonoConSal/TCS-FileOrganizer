@@ -16,7 +16,7 @@ import os
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 sys.path.insert(0, str(BASE_DIR))
 
-from organizer import load_config, build_extension_map, organize_folder, start_watcher
+from organizer import load_config, build_extension_map, organize_folder, start_watcher, default_exclude, validate_config
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
 C = {
@@ -250,11 +250,27 @@ class OrganizerApp(tk.Tk):
             self._config_path.set(path)
 
     def _get_config(self):
+        # Solo se llama desde el hilo principal: aquí sí se puede leer
+        # variables Tkinter. Lanza ValueError si la config no es válida.
         cfg_str = self._config_path.get().strip()
         cfg_path = Path(cfg_str) if cfg_str else None
         config = load_config(cfg_path)
         config["conflict"] = self._conflict.get()
+        validate_config(config)
         return config
+
+    def _get_config_path(self):
+        # Solo se llama desde el hilo principal.
+        cfg_str = self._config_path.get().strip()
+        return Path(cfg_str) if cfg_str else None
+
+    def _get_exclude(self, folder, config, cfg_path=None):
+        """Los archivos propios que nunca se mueven (log, config, scripts).
+
+        No accede a variables Tkinter: el llamador debe capturar
+        cfg_path en el hilo principal y pasarlo aquí.
+        """
+        return default_exclude(folder, config, cfg_path)
 
     def _validate_folder(self) -> Path | None:
         folder_str = self._folder.get().strip()
@@ -271,16 +287,23 @@ class OrganizerApp(tk.Tk):
         folder = self._validate_folder()
         if not folder:
             return
-        config = self._get_config()
+        try:
+            config = self._get_config()
+        except ValueError as exc:
+            self._set_status(f"❌  Config no válida: {exc}", C["danger"])
+            return
         ext_map = build_extension_map(config["categories"])
         dry = self._dry_run.get()
+        # Capturar en el hilo principal todo lo que el hilo secundario
+        # va a necesitar: no se lee ninguna variable Tkinter dentro de task().
+        exclude = self._get_exclude(folder, config, self._get_config_path())
 
         self._set_status("Organizando..." if not dry else "Simulando...", C["accent"])
         self._set_buttons_state("disabled")
 
         def task():
             try:
-                moved, skipped = organize_folder(folder, config, ext_map, self._logger, dry_run=dry)
+                moved, skipped = organize_folder(folder, config, ext_map, self._logger, dry_run=dry, exclude=exclude)
                 msg = f"{'[Simulación] ' if dry else ''}Listo — {moved} movidos, {skipped} saltados."
                 self.after(0, self._set_status, msg, C["success"])
             except Exception as e:
@@ -307,8 +330,15 @@ class OrganizerApp(tk.Tk):
             self._set_status("❌  Instala watchdog: pip install watchdog", C["danger"])
             return
 
-        config = self._get_config()
+        try:
+            config = self._get_config()
+        except ValueError as exc:
+            self._set_status(f"❌  Config no válida: {exc}", C["danger"])
+            return
         ext_map = build_extension_map(config["categories"])
+        # Capturar en el hilo principal todo lo que el hilo secundario
+        # va a necesitar: no se lee ninguna variable Tkinter dentro de task().
+        exclude = self._get_exclude(folder, config, self._get_config_path())
 
         # Reiniciamos la señal antes de iniciar un nuevo watcher.
         self._watcher_stop_event.clear()
@@ -324,7 +354,8 @@ class OrganizerApp(tk.Tk):
                     config,
                     ext_map,
                     self._logger,
-                    self._watcher_stop_event
+                    self._watcher_stop_event,
+                    exclude=exclude,
                 )
             except Exception as e:
                 self.after(0, self._set_status,
