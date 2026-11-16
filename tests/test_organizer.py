@@ -247,19 +247,24 @@ class RenameLogTests(unittest.TestCase):
 class CliPromptTests(unittest.TestCase):
     def test_prompt_folder_accepts_typed_path(self):
         with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp)
+            # Resuelto: prompt_folder() devuelve la ruta resuelta, y en
+            # Windows el temporal puede venir en forma corta 8.3
+            # (C:\Users\RUNNER~1\...) mientras resolve() devuelve la
+            # forma larga (C:\Users\runneradmin\...). Comparar sin
+            # resolver falla solo en ese entorno.
+            folder = Path(tmp).resolve()
             with mock.patch("organizer.input", return_value=str(folder)):
                 self.assertEqual(prompt_folder(Path("/no/existe")), folder)
 
     def test_prompt_folder_empty_accepts_default(self):
         with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp)
+            folder = Path(tmp).resolve()
             with mock.patch("organizer.input", return_value=""):
                 self.assertEqual(prompt_folder(folder), folder)
 
     def test_prompt_folder_reasks_when_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp)
+            folder = Path(tmp).resolve()
             with mock.patch(
                 "organizer.input",
                 side_effect=["/no/existe/seguro", str(folder)],
