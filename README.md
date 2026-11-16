@@ -116,7 +116,7 @@ pip install tomli
 Al arrancar, la CLI muestra estas dos preguntas:
 
 ```bash
-Carpeta a organizar [~/Descargas]: /tmp/mi-carpeta
+Carpeta a organizar [/home/fer/Descargas]: /tmp/mi-carpeta
 Modo de conflicto ['ask', 'overwrite', 'rename', 'skip'] [ask]: rename
 ```
 
@@ -247,7 +247,7 @@ La interfaz gráfica muestra las operaciones en tiempo real mediante diferentes 
 - Errores.
 - Información de depuración.
 
-La versión CLI genera un archivo `organizer.log` dentro de la carpeta organizada, con líneas como `MOVIDO foto.jpg → Imágenes/foto_1.jpg` y `CONFLICTO → foto.jpg ya existe, renombrado a foto_1.jpg`. Ese log nunca se mueve a otra categoría, aunque esté dentro de la carpeta que organizas.
+La versión CLI genera un archivo `organizer.log` dentro de la carpeta organizada, con líneas como `MOVIDO  foto.jpg  →  Imágenes/foto_1.jpg` y `CONFLICTO → foto.jpg ya existe, renombrado a foto_1.jpg`. Ese log nunca se mueve a otra categoría, aunque esté dentro de la carpeta que organizas.
 
 La GUI **no guarda el log en archivo**: solo lo muestra en la sección **Actividad** de la ventana. Si ya existe un `organizer.log` en la carpeta, la GUI tampoco lo mueve.
 

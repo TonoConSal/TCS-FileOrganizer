@@ -113,7 +113,7 @@ También puedes usar FileOrganizer desde Python con `organizer.py`, sin abrir la
 Si no le pasas una carpeta, la CLI pregunta antes de mover nada:
 
 ```bash
-Carpeta a organizar [~/Descargas]: /tmp/mi-carpeta
+Carpeta a organizar [/home/fer/Descargas]: /tmp/mi-carpeta
 Modo de conflicto ['ask', 'overwrite', 'rename', 'skip'] [ask]: rename
 ```
 
