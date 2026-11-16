@@ -27,15 +27,41 @@ from organizer_gui import ConflictAsker, OrganizerApp
 
 
 def _has_display():
-    try:
-        root = tk.Tk()
-        root.destroy()
-        return True
-    except tk.TclError:
-        return False
+    # Dos intentos: en Windows, Tcl a veces falla al leer su init.tcl
+    # de forma transitoria (archivo bloqueado un instante por el
+    # antivirus u otro proceso) y un reintento basta.
+    for _ in range(2):
+        try:
+            root = tk.Tk()
+            root.destroy()
+            return True
+        except tk.TclError:
+            time.sleep(0.3)
+    return False
 
 
 HAS_DISPLAY = _has_display()
+
+
+def _new_root():
+    """Crea una ventana Tk; si Tcl no arranca, la prueba se salta.
+
+    Un TclError aquí es un problema del entorno (Tk no pudo ni
+    inicializarse), no del programa: fallar la prueba sería un falso
+    positivo. El skip deja constancia del motivo.
+    """
+    try:
+        return tk.Tk()
+    except tk.TclError as exc:
+        raise unittest.SkipTest(f"Tk no pudo arrancar: {exc}") from exc
+
+
+def _new_app():
+    """Como _new_root, pero crea la app completa (OrganizerApp)."""
+    try:
+        return OrganizerApp()
+    except tk.TclError as exc:
+        raise unittest.SkipTest(f"Tk no pudo arrancar: {exc}") from exc
 
 
 class _StubApp:
@@ -87,7 +113,7 @@ def _close_organizer_logger():
 @unittest.skipUnless(HAS_DISPLAY, "sin display (usa xvfb-run en Linux)")
 class ConflictDialogTests(unittest.TestCase):
     def setUp(self):
-        self.root = tk.Tk()
+        self.root = _new_root()
         self.root.withdraw()
 
     def tearDown(self):
@@ -174,7 +200,7 @@ class GuiAppTests(unittest.TestCase):
         _close_organizer_logger()
 
     def test_ensure_file_log_creates_and_replaces_handler(self):
-        app = OrganizerApp()
+        app = _new_app()
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 config = load_config(None)
@@ -222,7 +248,7 @@ class GuiAppTests(unittest.TestCase):
             )
 
             closed = []
-            app = OrganizerApp()
+            app = _new_app()
             app._folder.set(str(folder))
             app._conflict.set("ask")
 
@@ -267,7 +293,7 @@ class GuiAppTests(unittest.TestCase):
             # APPDATA temporal para que en Windows el log no toque el real.
             appdata = Path(tmp) / "appdata"
 
-            app = OrganizerApp()
+            app = _new_app()
             app._folder.set(str(folder))
             app._conflict.set("rename")
             seen = []
