@@ -24,7 +24,7 @@ Selecciona el archivo correspondiente a tu sistema operativo.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  📁  File Organizer                      v2.5.1 │
+│  📁  File Organizer                      v2.6.0 │
 ├─────────────────────────────────────────────────┤
 │  CARPETA A ORGANIZAR                            │
 │  [ C:\Users\...\Downloads        ] [Examinar]   │
@@ -189,7 +189,7 @@ El modo también se puede fijar en la configuración (`conflict = "rename"`) o c
 
 > El watcher no puede preguntar: si el modo de conflicto es `ask`, usa `rename` automáticamente y lo avisa en el log. La configuración original no cambia; organizar una sola vez sigue preguntando normal.
 
-Con `--watch --dry-run` solo simula la organización inicial y no inicia el watcher.
+Con `--watch --dry-run` el watcher sí se inicia, pero solo simula: registra lo que movería sin mover nada. En un conflicto de simulación el log dice lo que haría según el modo elegido: con renombrar muestra el nombre que quedaría, con sobrescribir o saltar lo dice, y con preguntar avisa que preguntaría.
 
 ---
 ## 📂 ¿Dónde van a parar mis archivos?
@@ -232,7 +232,7 @@ Elige qué pasa cuando ya hay un archivo con el mismo nombre en la carpeta desti
 | **Saltar**     | Lo ignora y lo deja donde está                                   |
 | **Sobreescribir** | Reemplaza el archivo existente sin preguntar                 |
 
-> **En la GUI:** la opción **Preguntar** solo funciona si la aplicación se lanzó desde una terminal. En el `.exe` (sin consola), un conflicto con **Preguntar** detiene la organización con un error; usa **Renombrar** en ese caso. En la CLI, **Preguntar** funciona normal porque sí hay terminal.
+> **En la GUI:** la opción **Preguntar** abre un diálogo en la ventana con Renombrar / Sobrescribir / Saltar / Cancelar. Cancelar aborta la corrida sin cerrar la app, y cerrar el diálogo con la X equivale a Saltar ese archivo. Así funciona también en el `.exe` sin consola. En la CLI, **Preguntar** funciona por terminal, con `[q]` para salir.
 
 ---
 
@@ -248,7 +248,7 @@ Cuando activas el **watcher**, el programa permanece abierto y supervisa la carp
 
 > Si el modo es **Preguntar**, el watcher usa **Renombrar** automáticamente, porque no hay nadie para contestar en ese momento; lo avisa en el log y nunca sobrescribe nada. Esto aplica igual a la GUI y a la CLI (`--watch`).
 
-> En la GUI, el modo simulación no aplica al watcher: si lo activas, mueve archivos de verdad aunque la casilla esté marcada. En la CLI, `--watch --dry-run` solo simula y no inicia el watcher.
+> El modo simulación sí aplica al watcher: si la casilla está marcada, el watcher solo registra lo que movería, sin mover nada. Igual en la CLI: `--watch --dry-run` inicia el watcher en simulación.
 
 ---
 
@@ -271,7 +271,7 @@ Los mensajes utilizan diferentes colores según su nivel:
 
 Puedes utilizar el botón **Limpiar log** para borrar los mensajes visibles en la interfaz.
 
-**Nota:** la GUI **no guarda el log en archivo**: solo lo muestra en la sección **Actividad** de la ventana, y al cerrar la aplicación ese registro se pierde. La CLI sí genera un archivo `organizer.log` dentro de la carpeta organizada, con las mismas líneas de `MOVIDO` y `CONFLICTO` que se ven en pantalla.
+**Nota:** tanto la CLI como la GUI guardan el log en un archivo `organizer.log` en la carpeta estándar de datos de la aplicación: `%APPDATA%\TCS-FileOrganizer` en Windows y `~/.local/share/TCS-FileOrganizer` en Linux (macOS: `~/Library/Application Support/TCS-FileOrganizer`). Si en la config pones una ruta absoluta en `log_file`, esa ruta gana. Al terminar, la CLI imprime la ruta del log y la GUI la muestra en la barra de estado. Un `organizer.log` viejo que quede dentro de la carpeta (de la versión 2.5.1 o anterior) nunca se mueve a otra categoría.
 
 ---
 
@@ -280,6 +280,8 @@ Puedes utilizar el botón **Limpiar log** para borrar los mensajes visibles en l
 FileOrganizer permite personalizar su comportamiento mediante archivos de configuración `.toml` o `.json`.
 
 Estos archivos permiten modificar las categorías, agregar nuevas extensiones y ajustar opciones como el comportamiento ante conflictos entre archivos.
+
+Las categorías de tu archivo se **suman** a las de por defecto: si agregas `".avif"` a `"Imágenes"`, esa categoría sigue teniendo `.jpg`, `.png`, etc. Para **quitar** una categoría, ponla con una lista vacía: `"Torrents" = []`.
 
 Puedes encontrar archivos de ejemplo en el repositorio. Descarga el formato que prefieras, edítalo con un editor de texto y cárgalo mediante el botón **Examinar** en el campo de configuración de la aplicación.
 

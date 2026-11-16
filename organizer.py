@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import mimetypes
+import os
 import shutil
 import sys
 import time
@@ -45,7 +46,7 @@ except ImportError:
 # ── Versión ───────────────────────────────────────────────────────────────────
 # Única fuente de la versión: la GUI la muestra como "v{__version__}".
 # Al hacer un release, el tag (vX.Y.Z) debe coincidir con este valor.
-__version__ = "2.5.1"
+__version__ = "2.6.0"
 
 
 # ── Config por defecto ────────────────────────────────────────────────────────
@@ -97,12 +98,48 @@ DEFAULT_CONFIG = {
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
+def default_log_dir() -> Path:
+    """Carpeta por defecto donde vive organizer.log (opción D, tanda 2).
+
+    Sigue la convención de cada sistema, sin inventar rutas propias:
+    %APPDATA%/TCS-FileOrganizer en Windows, $XDG_DATA_HOME o
+    ~/.local/share/TCS-FileOrganizer en Linux, y ~/Library/Application
+    Support/TCS-FileOrganizer en macOS. Así el log ya no ensucia la
+    carpeta que se está organizando.
+    """
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+        return base / "TCS-FileOrganizer"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "TCS-FileOrganizer"
+    base = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    return base / "TCS-FileOrganizer"
+
+
+def resolve_log_path(config: dict) -> Path:
+    """Ruta completa del archivo de log.
+
+    `log_file` sigue siendo el nombre del archivo (por defecto
+    "organizer.log"). Si es una ruta absoluta, gana tal cual (vía de
+    escape para quien quiera el log en otro lado); si es relativa, va
+    dentro de default_log_dir(). Sin log_file válido, usa el default.
+    """
+    log_file = config.get("log_file") if isinstance(config, dict) else None
+    if not isinstance(log_file, str) or not log_file.strip():
+        log_file = "organizer.log"
+    path = Path(log_file)
+    if path.is_absolute():
+        return path
+    return default_log_dir() / path
+
+
 def setup_logging(log_path: Path) -> logging.Logger:
     logger = logging.getLogger("organizer")
     logger.setLevel(logging.DEBUG)
 
     fmt = logging.Formatter("[%(asctime)s] %(levelname)-8s %(message)s", "%Y-%m-%d %H:%M:%S")
 
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(log_path, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(fmt)
@@ -120,7 +157,9 @@ def setup_logging(log_path: Path) -> logging.Logger:
 
 def load_config(config_path: Path | None) -> dict:
     config = DEFAULT_CONFIG.copy()
-    config["categories"] = dict(DEFAULT_CONFIG["categories"])
+    # Copiar también las listas: si no, fusionar categorías mutaría
+    # las listas de DEFAULT_CONFIG y contaminaría las siguientes cargas.
+    config["categories"] = {k: list(v) for k, v in DEFAULT_CONFIG["categories"].items()}
     config["mime_fallback"] = dict(DEFAULT_CONFIG["mime_fallback"])
 
     if config_path is None:
@@ -145,9 +184,11 @@ def load_config(config_path: Path | None) -> dict:
         print(f"[!] Formato de config no soportado: {suffix} (usa .json o .toml)")
         sys.exit(1)
 
-    # Merge: el usuario puede sobreescribir o agregar categorías
+    # Merge: las categorías del usuario se SUMAN a las de por defecto
+    # (tanda 2). Antes, update() reemplazaba la lista completa y se
+    # perdían las extensiones de por defecto de esa categoría.
     if "categories" in user:
-        config["categories"].update(user["categories"])
+        config["categories"] = _merge_categories(config["categories"], user["categories"])
     if "mime_fallback" in user:
         config["mime_fallback"].update(user["mime_fallback"])
     for key in ("log_file", "conflict", "watch_delay"):
@@ -155,6 +196,41 @@ def load_config(config_path: Path | None) -> dict:
             config[key] = user[key]
 
     return config
+
+
+def _merge_categories(base: dict, user: dict) -> dict:
+    """Fusiona categorías de usuario con las de por defecto.
+
+    - La lista del usuario se suma a la de por defecto (sin duplicados:
+      primero las de por defecto, luego las nuevas).
+    - Una lista vacía [] QUITA esa categoría.
+    - Una categoría nueva se agrega tal cual.
+    Lanza ValueError si la forma de los datos no es usable.
+    """
+    if not isinstance(user, dict):
+        raise ValueError("La sección 'categories' debe ser un diccionario.")
+    merged = {name: list(exts) for name, exts in base.items()}
+    for name, exts in user.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Los nombres de categoría deben ser texto no vacío.")
+        if not isinstance(exts, list):
+            raise ValueError(
+                f"La categoría {name!r} debe ser una lista de extensiones."
+            )
+        if exts == []:
+            merged.pop(name, None)
+            continue
+        for ext in exts:
+            if not isinstance(ext, str) or not ext.startswith(".") or len(ext) < 2:
+                raise ValueError(
+                    f"La extensión {ext!r} en la categoría {name!r} no es válida "
+                    "(usa el formato '.ext')."
+                )
+        existing = merged.setdefault(name, [])
+        for ext in exts:
+            if ext not in existing:
+                existing.append(ext)
+    return merged
 
 
 # ── Lógica de categorización ──────────────────────────────────────────────────
@@ -194,9 +270,18 @@ def get_category(file: Path, ext_map: dict, mime_fallback: dict) -> str:
 
 # ── Resolución de conflictos ──────────────────────────────────────────────────
 
-def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger) -> Path | None:
+def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger,
+                     on_conflict=None) -> Path | None:
     """
     Retorna el Path destino final, o None si se debe saltar el archivo.
+
+    En modo "ask", si se pasa `on_conflict` (un callable que recibe
+    (src, dst) y devuelve "rename", "overwrite", "skip" o "cancel"),
+    la decisión se le pide a ese callable en vez de a la consola. Es
+    lo que usa la GUI: el hilo de trabajo no puede usar input(), así
+    que el diálogo se muestra en el hilo principal. "cancel" aborta
+    toda la corrida con UserCancelled. Sin `on_conflict` se pregunta
+    por consola, como siempre (solo sirve en el CLI).
     """
     if mode == "overwrite":
         return dst
@@ -208,6 +293,8 @@ def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger) ->
         logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
         return renamed
     elif mode == "ask":
+        if on_conflict is not None:
+            return _resolve_conflict_asked(src, dst, logger, on_conflict)
         print(f"\n⚠️  Conflicto: '{dst.name}' ya existe en '{dst.parent}'")
         print("   [r] Renombrar  [o] Sobreescribir  [s] Saltar  [q] Salir")
         while True:
@@ -232,6 +319,47 @@ def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger) ->
     )
 
 
+class UserCancelled(Exception):
+    """El usuario canceló la operación en un diálogo de conflicto."""
+
+
+# Elecciones que puede devolver un callback on_conflict (se aceptan
+# también las letras del CLI: r/o/s/q).
+_CONFLICT_CHOICES = {
+    "rename": "rename", "r": "rename",
+    "overwrite": "overwrite", "o": "overwrite",
+    "skip": "skip", "s": "skip",
+    "cancel": "cancel", "q": "cancel",
+}
+
+
+def _resolve_conflict_asked(src: Path, dst: Path, logger: logging.Logger,
+                            on_conflict) -> Path | None:
+    """Resuelve un conflicto con la decisión de un callback (GUI).
+
+    El callback recibe (src, dst) y devuelve "rename", "overwrite",
+    "skip" o "cancel" (o sus letras "r"/"o"/"s"/"q").
+    """
+    raw = on_conflict(src, dst)
+    choice = _CONFLICT_CHOICES.get(str(raw).strip().lower())
+    if choice == "rename":
+        renamed = unique_path(dst)
+        logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
+        return renamed
+    if choice == "overwrite":
+        return dst
+    if choice == "skip":
+        logger.warning(f"SKIP (usuario) → {dst.name}")
+        return None
+    if choice == "cancel":
+        logger.info("Usuario canceló la operación.")
+        raise UserCancelled("El usuario canceló la operación.")
+    raise ValueError(
+        f"Respuesta de conflicto no válida: {raw!r} "
+        "(usa rename, overwrite, skip o cancel)"
+    )
+
+
 VALID_CONFLICT_MODES = frozenset({"ask", "rename", "skip", "overwrite"})
 
 
@@ -244,19 +372,26 @@ def default_exclude(
     La CLI y la GUI deben usar este mismo helper, para que el arreglo no
     quede solo en un lado.
 
-    Si la config no trae "log_file" (o viene vacío / no es texto), no se
-    excluye ningún log y no se lanza KeyError: se excluyen solo los
-    scripts y la config. Los puntos de entrada deben validar la config
-    con validate_config() antes de llegar aquí, para que ese caso falle
-    rápido con un mensaje claro en vez de seguir sin log excluido.
+    El log hoy vive en default_log_dir(), fuera de la carpeta, así que
+    normalmente no hay nada que excluir por él; pero si la config pone
+    el log dentro de la carpeta (ruta absoluta ahí, o log_file que lo
+    apunte), esa ruta resuelta sí se excluye. Si la config no trae
+    "log_file" (o viene vacío / no es texto), no se excluye ningún log
+    y no se lanza KeyError: se excluyen solo los scripts y la config.
+    Los puntos de entrada deben validar la config con validate_config()
+    antes de llegar aquí, para que ese caso falle rápido con un mensaje
+    claro en vez de seguir sin log excluido.
     """
     exclude = {
         Path(__file__).resolve(),
         (Path(__file__).resolve().parent / "organizer_gui.py").resolve(),
+        # Compat: un organizer.log viejo (v2.5.1 y antes, cuando el log
+        # vivía dentro de la carpeta) tampoco debe moverse.
+        (folder / "organizer.log").resolve(),
     }
     log_file = config.get("log_file") if isinstance(config, dict) else None
     if isinstance(log_file, str) and log_file.strip():
-        exclude.add((folder / log_file).resolve())
+        exclude.add(resolve_log_path(config))
     if config_path:
         exclude.add(config_path.resolve())
     return frozenset(exclude)
@@ -280,6 +415,23 @@ def validate_config(config: dict) -> None:
         raise ValueError(
             "La configuración debe incluir 'log_file' como texto no vacío."
         )
+    categories = config.get("categories")
+    if not isinstance(categories, dict):
+        raise ValueError("La configuración debe incluir 'categories' como diccionario.")
+    for name, exts in categories.items():
+        if not isinstance(exts, list) or any(
+            not isinstance(e, str) or not e.startswith(".") or len(e) < 2 for e in exts
+        ):
+            raise ValueError(
+                f"La categoría {name!r} debe ser una lista de extensiones "
+                "con formato '.ext'."
+            )
+    mime_fallback = config.get("mime_fallback")
+    if mime_fallback is not None and (
+        not isinstance(mime_fallback, dict)
+        or any(not isinstance(k, str) or not isinstance(v, str) for k, v in mime_fallback.items())
+    ):
+        raise ValueError("La configuración debe incluir 'mime_fallback' como diccionario de texto.")
 
 
 # Únicas extensiones compuestas que se reconocen como una sola.
@@ -323,10 +475,12 @@ def move_file(
     ext_map: dict,
     logger: logging.Logger,
     dry_run: bool = False,
+    on_conflict=None,
 ) -> bool:
     """
     Mueve src a la subcarpeta correcta dentro de target_dir.
     Retorna True si se movió (o se hubiera movido en dry-run).
+    `on_conflict` se pasa a resolve_conflict() para el modo "ask".
     """
     category = get_category(src, ext_map, config["mime_fallback"])
     dest_folder = target_dir / category
@@ -340,9 +494,27 @@ def move_file(
     final_dest = dest_file
     if dest_file.exists():
         if dry_run:
-            logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → {dest_folder}/")
+            # La simulación respeta el modo elegido: antes siempre
+            # mostraba el nombre renombrado, aunque el modo fuera
+            # skip, overwrite o ask.
+            mode = config["conflict"]
+            if mode == "rename":
+                renamed = unique_path(dest_file)
+                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → {category}/{renamed.name}")
+            elif mode == "overwrite":
+                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → {category}/{dest_file.name} (sobrescribiría)")
+            elif mode == "skip":
+                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → saltaría (ya existe en {category}/)")
+            elif mode == "ask":
+                renamed = unique_path(dest_file)
+                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → preguntaría (renombrar sería {category}/{renamed.name})")
+            else:
+                raise ValueError(
+                    f"Modo de conflicto no válido: {mode!r} "
+                    "(usa ask, rename, skip u overwrite)"
+                )
             return True
-        final_dest = resolve_conflict(src, dest_file, config["conflict"], logger)
+        final_dest = resolve_conflict(src, dest_file, config["conflict"], logger, on_conflict)
         if final_dest is None:
             return False
 
@@ -365,11 +537,14 @@ def organize_folder(
     logger: logging.Logger,
     dry_run: bool = False,
     exclude: frozenset[Path] | None = None,
+    on_conflict=None,
 ) -> tuple[int, int]:
     """Organiza todos los archivos en la carpeta (no recursivo). Retorna (movidos, saltados).
 
     `exclude` son rutas (resueltas) que nunca se mueven: el propio log, el
     archivo de config y los scripts del programa, si están en la carpeta.
+    `on_conflict` se pasa a move_file() para el modo "ask". Si el usuario
+    cancela en un diálogo, se lanza UserCancelled y la corrida se aborta.
     """
     moved = skipped = 0
     excluded = {Path(p).resolve() for p in exclude} if exclude else set()
@@ -386,7 +561,7 @@ def organize_folder(
     logger.info(f"{'[DRY-RUN] ' if dry_run else ''}Organizando {len(files)} archivo(s) en '{folder}'...")
 
     for f in files:
-        result = move_file(f, folder, config, ext_map, logger, dry_run)
+        result = move_file(f, folder, config, ext_map, logger, dry_run, on_conflict)
         if result:
             moved += 1
         else:
@@ -400,11 +575,12 @@ def organize_folder(
 
 class OrganizerHandler(FileSystemEventHandler):
     def __init__(self, folder: Path, config: dict, ext_map: dict, logger: logging.Logger,
-                 exclude: frozenset[Path] | None = None):
+                 exclude: frozenset[Path] | None = None, dry_run: bool = False):
         self.folder = folder
         self.config = config
         self.ext_map = ext_map
         self.logger = logger
+        self._dry_run = dry_run
         self._pending: dict[str, float] = {}
         self._excluded = {Path(p).resolve() for p in exclude} if exclude else set()
 
@@ -427,7 +603,7 @@ class OrganizerHandler(FileSystemEventHandler):
             if path.resolve() in self._excluded:
                 continue
             if path.exists() and path.is_file():
-                move_file(path, self.folder, self.config, self.ext_map, self.logger)
+                move_file(path, self.folder, self.config, self.ext_map, self.logger, self._dry_run)
 
 
 
@@ -458,6 +634,7 @@ def start_watcher(
     logger: logging.Logger,
     stop_event: threading.Event | None = None,
     exclude: frozenset[Path] | None = None,
+    dry_run: bool = False,
 ):
     if not WATCHDOG_AVAILABLE:
         logger.error("Watchdog no está instalado. Instálalo con: pip install watchdog")
@@ -468,14 +645,15 @@ def start_watcher(
         stop_event = threading.Event()
 
     handler = OrganizerHandler(
-        folder, _watcher_config(config, logger), ext_map, logger, exclude=exclude
+        folder, _watcher_config(config, logger), ext_map, logger, exclude=exclude,
+        dry_run=dry_run,
     )
     observer = Observer()
 
     observer.schedule(handler, str(folder), recursive=False)
     observer.start()
 
-    logger.info(f"👁️ Watcher activo en '{folder}'.")
+    logger.info(f"{'[DRY-RUN] ' if dry_run else ''}👁️ Watcher activo en '{folder}'.")
 
     try:
         while not stop_event.is_set():
@@ -613,7 +791,7 @@ def main():
     elif not args.no_prompt:
         config["conflict"] = prompt_conflict_mode(config["conflict"])
 
-    log_path = folder / config["log_file"]
+    log_path = resolve_log_path(config)
     logger = setup_logging(log_path)
 
     # Archivos propios que nunca deben moverse, aunque estén en la carpeta
@@ -622,6 +800,7 @@ def main():
 
     logger.info(f"=== Organizer iniciado {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
     logger.info(f"Carpeta objetivo: {folder}")
+    logger.info(f"Log guardado en: {log_path}")
     logger.info(f"Modo de conflicto: {config['conflict']}")
     if args.config:
         logger.info(f"Config cargada desde: {args.config}")
@@ -629,12 +808,15 @@ def main():
     ext_map = build_extension_map(config["categories"])
 
     if args.watch:
-        # En modo watch, primero organiza lo existente y luego se queda escuchando
+        # En modo watch, primero organiza lo existente y luego se queda
+        # escuchando. Con --dry-run el watcher también simula: registra
+        # lo que movería sin mover nada (tanda 2).
         organize_folder(folder, config, ext_map, logger, dry_run=args.dry_run, exclude=exclude)
-        if not args.dry_run:
-            start_watcher(folder, config, ext_map, logger, exclude=exclude)
+        start_watcher(folder, config, ext_map, logger, exclude=exclude, dry_run=args.dry_run)
     else:
         organize_folder(folder, config, ext_map, logger, dry_run=args.dry_run, exclude=exclude)
+
+    print(f"Log guardado en: {log_path}")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 Se corren con:
     python -m unittest discover -s tests -v
 """
+import json
 import logging
 import os
 import re
@@ -19,15 +20,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from organizer import (  # noqa: E402
     DEFAULT_CONFIG,
     __version__,
+    UserCancelled,
     build_extension_map,
     default_exclude,
+    default_log_dir,
     load_config,
+    move_file,
     OrganizerHandler,
+    resolve_log_path,
     _watcher_config,
     organize_folder,
     prompt_conflict_mode,
     prompt_folder,
     resolve_conflict,
+    setup_logging,
     unique_path,
     validate_config,
 )
@@ -146,7 +152,9 @@ class ConflictTests(unittest.TestCase):
 
     def test_default_exclude_without_log_file_does_not_raise(self):
         # default_exclude() no debe lanzar KeyError: excluye scripts y
-        # config, y simplemente no excluye ningún log.
+        # config. Sin log_file no se excluye la ruta resuelta del log,
+        # pero el organizer.log viejo de la carpeta sigue excluido por
+        # compatibilidad (v2.5.1 y antes, cuando el log vivía ahí).
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             config = load_config(None)
@@ -154,7 +162,7 @@ class ConflictTests(unittest.TestCase):
             excluded = default_exclude(folder, config)
             self.assertIn((Path(__file__).resolve().parent.parent / "organizer.py").resolve(), excluded)
             self.assertIn((Path(__file__).resolve().parent.parent / "organizer_gui.py").resolve(), excluded)
-            self.assertNotIn((folder / "organizer.log").resolve(), excluded)
+            self.assertIn((folder / "organizer.log").resolve(), excluded)
 
 
 class OrganizeFolderTests(unittest.TestCase):
@@ -242,6 +250,117 @@ class RenameLogTests(unittest.TestCase):
                 any("MOVIDO" in r and "Imágenes/foto_1.jpg" in r for r in records),
                 f"el log MOVIDO debe incluir el nombre final: {records}",
             )
+
+
+class AskCallbackTests(unittest.TestCase):
+    def _conflict_setup(self, tmp):
+        folder = Path(tmp)
+        (folder / "Imágenes").mkdir()
+        (folder / "Imágenes" / "foto.jpg").write_text("vieja")
+        (folder / "foto.jpg").write_text("nueva")
+        return folder
+
+    def test_ask_callback_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            result = resolve_conflict(src, dst, "ask", _logger(),
+                                      on_conflict=lambda s, d: "rename")
+            self.assertEqual(result.name, "foto_1.jpg")
+
+    def test_ask_callback_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            result = resolve_conflict(src, dst, "ask", _logger(),
+                                      on_conflict=lambda s, d: "overwrite")
+            self.assertEqual(result, dst)
+
+    def test_ask_callback_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            result = resolve_conflict(src, dst, "ask", _logger(),
+                                      on_conflict=lambda s, d: "skip")
+            self.assertIsNone(result)
+
+    def test_ask_callback_cancel_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            with self.assertRaises(UserCancelled):
+                resolve_conflict(src, dst, "ask", _logger(),
+                                 on_conflict=lambda s, d: "cancel")
+
+    def test_ask_callback_accepts_cli_letters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            result = resolve_conflict(src, dst, "ask", _logger(),
+                                      on_conflict=lambda s, d: "r")
+            self.assertEqual(result.name, "foto_1.jpg")
+            with self.assertRaises(UserCancelled):
+                resolve_conflict(src, dst, "ask", _logger(),
+                                 on_conflict=lambda s, d: "q")
+
+    def test_ask_callback_invalid_choice_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            with self.assertRaises(ValueError):
+                resolve_conflict(src, dst, "ask", _logger(),
+                                 on_conflict=lambda s, d: "tal vez")
+
+    def test_ask_callback_receives_src_and_dst(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            seen = []
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            resolve_conflict(src, dst, "ask", _logger(),
+                             on_conflict=lambda s, d: seen.append((s, d)) or "skip")
+            self.assertEqual(seen, [(src, dst)])
+
+    def test_ask_console_fallback_still_works_without_callback(self):
+        # Sin callback, el modo ask sigue preguntando por consola (CLI).
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            with mock.patch("organizer.input", return_value="r"):
+                result = resolve_conflict(src, dst, "ask", _logger())
+            self.assertEqual(result.name, "foto_1.jpg")
+
+    def test_ask_cancel_aborts_run_leaving_files_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            config = load_config(None)
+            config["conflict"] = "ask"
+            ext_map = build_extension_map(config["categories"])
+            with self.assertRaises(UserCancelled):
+                organize_folder(folder, config, ext_map, _logger(),
+                                on_conflict=lambda s, d: "cancel")
+            # Nada se movió: el archivo sigue en su lugar y el
+            # destino no se tocó.
+            self.assertTrue((folder / "foto.jpg").exists())
+            self.assertEqual((folder / "Imágenes" / "foto.jpg").read_text(), "vieja")
+
+    def test_ask_rename_via_callback_completes_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            config = load_config(None)
+            config["conflict"] = "ask"
+            ext_map = build_extension_map(config["categories"])
+            moved, _ = organize_folder(folder, config, ext_map, _logger(),
+                                       on_conflict=lambda s, d: "rename")
+            self.assertEqual(moved, 1)
+            self.assertTrue((folder / "Imágenes" / "foto_1.jpg").exists())
 
 
 class CliPromptTests(unittest.TestCase):
@@ -387,6 +506,79 @@ class CliPromptTests(unittest.TestCase):
             )
 
 
+class LogDirTests(unittest.TestCase):
+    def test_default_log_dir_uses_xdg_data_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp}):
+                self.assertEqual(default_log_dir(), Path(tmp) / "TCS-FileOrganizer")
+
+    def test_default_log_dir_falls_back_to_local_share(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            with mock.patch.dict(os.environ, {"HOME": str(home)}, clear=False):
+                os.environ.pop("XDG_DATA_HOME", None)
+                # Path.home() usa HOME en Linux
+                self.assertEqual(default_log_dir(), home / ".local" / "share" / "TCS-FileOrganizer")
+
+    def test_resolve_log_path_relative_goes_to_default_dir(self):
+        config = load_config(None)
+        self.assertEqual(resolve_log_path(config), default_log_dir() / "organizer.log")
+
+    def test_resolve_log_path_absolute_wins(self):
+        config = load_config(None)
+        config["log_file"] = "/tmp/mis-logs/otro.log"
+        self.assertEqual(resolve_log_path(config), Path("/tmp/mis-logs/otro.log"))
+
+    def test_resolve_log_path_without_log_file_uses_default(self):
+        self.assertEqual(resolve_log_path({}), default_log_dir() / "organizer.log")
+        self.assertEqual(resolve_log_path({"log_file": "   "}), default_log_dir() / "organizer.log")
+
+    def test_setup_logging_creates_parent_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "a" / "b" / "organizer.log"
+            logger = setup_logging(log_path)
+            logger.info("hola")
+            for handler in list(logger.handlers):
+                handler.close()
+            logger.handlers.clear()
+            self.assertTrue(log_path.exists())
+            self.assertIn("hola", log_path.read_text(encoding="utf-8"))
+
+    def test_default_exclude_excludes_new_log_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            log_dir = Path(tmp) / "logs"
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(log_dir)}):
+                config = load_config(None)
+                excluded = default_exclude(folder, config)
+                self.assertIn((log_dir / "TCS-FileOrganizer" / "organizer.log"), excluded)
+
+    def test_main_prints_log_path_at_end(self):
+        repo = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            downloads = home / "Downloads"
+            downloads.mkdir(parents=True)
+            (downloads / "decoy.txt").write_text("decoy")
+            env = CliPromptTests._fake_home_env(home)
+            env.pop("XDG_DATA_HOME", None)
+            result = subprocess.run(
+                [sys.executable, str(repo / "organizer.py"), "--no-prompt"],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Log guardado en:", result.stdout)
+            self.assertIn("organizer.log", result.stdout)
+            # El log ya no queda dentro de Downloads
+            self.assertFalse((downloads / "organizer.log").exists())
+            self.assertTrue((home / ".local" / "share" / "TCS-FileOrganizer" / "organizer.log").exists())
+
+
 class WatcherConfigTests(unittest.TestCase):
     def _capturing_logger(self):
         records = []
@@ -459,6 +651,222 @@ class WatcherConfigTests(unittest.TestCase):
                 any("CONFLICTO" in r and "foto_1.jpg" in r for r in records),
                 f"falta el log de conflicto: {records}",
             )
+
+
+class WatcherDryRunTests(unittest.TestCase):
+    def _capturing_logger(self):
+        records = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        logger = logging.getLogger("test-watcher-dry-run")
+        logger.setLevel(logging.DEBUG)
+        logger.handlers = [_Capture()]
+        logger.propagate = False
+        return logger, records
+
+    def test_handler_dry_run_does_not_move(self):
+        logger, records = self._capturing_logger()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            src = folder / "foto.jpg"
+            src.write_text("x")
+            config = load_config(None)
+            config["conflict"] = "rename"
+            ext_map = build_extension_map(config["categories"])
+            handler = OrganizerHandler(folder, config, ext_map, logger, dry_run=True)
+            handler._pending[str(src)] = time.time() - 10
+            handler.process_pending()
+            self.assertTrue(src.exists(), "dry-run no debe mover el archivo")
+            self.assertFalse((folder / "Imágenes").exists())
+            self.assertTrue(any("[DRY-RUN]" in r for r in records))
+
+    def test_handler_dry_run_conflict_logs_would_be_name(self):
+        logger, records = self._capturing_logger()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Imágenes").mkdir()
+            (folder / "Imágenes" / "foto.jpg").write_text("vieja")
+            src = folder / "foto.jpg"
+            src.write_text("nueva")
+            config = load_config(None)
+            config["conflict"] = "rename"
+            ext_map = build_extension_map(config["categories"])
+            handler = OrganizerHandler(folder, config, ext_map, logger, dry_run=True)
+            handler._pending[str(src)] = time.time() - 10
+            handler.process_pending()
+            self.assertTrue(src.exists())
+            self.assertEqual((folder / "Imágenes" / "foto.jpg").read_text(), "vieja")
+            self.assertTrue(
+                any("[DRY-RUN] CONFLICTO" in r and "foto_1.jpg" in r for r in records),
+                f"el log dry-run debe mostrar el nombre que quedaría: {records}",
+            )
+
+    def test_handler_default_is_real_move(self):
+        logger, records = self._capturing_logger()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            src = folder / "foto.jpg"
+            src.write_text("x")
+            config = load_config(None)
+            config["conflict"] = "rename"
+            ext_map = build_extension_map(config["categories"])
+            handler = OrganizerHandler(folder, config, ext_map, logger)
+            self.assertFalse(handler._dry_run)
+            handler._pending[str(src)] = time.time() - 10
+            handler.process_pending()
+            self.assertFalse(src.exists())
+            self.assertTrue((folder / "Imágenes" / "foto.jpg").exists())
+
+
+class ConfigMergeTests(unittest.TestCase):
+    def _user_config(self, tmp, data):
+        path = Path(tmp) / "mi_config.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_user_extensions_are_added_not_replacing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._user_config(tmp, {"categories": {"Imágenes": [".avif"]}})
+            config = load_config(path)
+            self.assertIn(".jpg", config["categories"]["Imágenes"])
+            self.assertIn(".avif", config["categories"]["Imágenes"])
+            # Sin duplicados y con las de por defecto primero
+            self.assertEqual(
+                config["categories"]["Imágenes"].count(".avif"), 1
+            )
+            self.assertLess(
+                config["categories"]["Imágenes"].index(".jpg"),
+                config["categories"]["Imágenes"].index(".avif"),
+            )
+
+    def test_user_category_is_added_alongside_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._user_config(tmp, {"categories": {"Mixtos": [".xyz"]}})
+            config = load_config(path)
+            self.assertIn("Mixtos", config["categories"])
+            self.assertIn("Imágenes", config["categories"])
+
+    def test_empty_list_removes_category(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._user_config(tmp, {"categories": {"Torrents": []}})
+            config = load_config(path)
+            self.assertNotIn("Torrents", config["categories"])
+            self.assertIn("Imágenes", config["categories"])
+
+    def test_merge_does_not_mutate_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._user_config(tmp, {"categories": {"Imágenes": [".avif"]}})
+            load_config(path)
+            self.assertNotIn(".avif", DEFAULT_CONFIG["categories"]["Imágenes"])
+            # Y una segunda carga sin config sigue limpia
+            self.assertNotIn(".avif", load_config(None)["categories"]["Imágenes"])
+
+    def test_malformed_categories_raise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._user_config(tmp, {"categories": {"Imágenes": "jpg"}})
+            with self.assertRaises(ValueError):
+                load_config(path)
+            path = self._user_config(tmp, {"categories": {"Imágenes": ["jpg"]}})
+            with self.assertRaises(ValueError):
+                load_config(path)
+            path = self._user_config(tmp, {"categories": "nada"})
+            with self.assertRaises(ValueError):
+                load_config(path)
+
+    def test_validate_config_rejects_bad_extensions(self):
+        config = load_config(None)
+        config["categories"]["Imágenes"] = ["jpg"]
+        with self.assertRaises(ValueError):
+            validate_config(config)
+        config = load_config(None)
+        config["categories"]["Imágenes"] = "jpg"
+        with self.assertRaises(ValueError):
+            validate_config(config)
+
+    def test_mime_fallback_still_merges_by_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._user_config(
+                tmp, {"mime_fallback": {"application/x-nuevo": "Otros"}}
+            )
+            config = load_config(path)
+            self.assertEqual(config["mime_fallback"]["application/x-nuevo"], "Otros")
+            self.assertEqual(config["mime_fallback"]["image/"], "Imágenes")
+
+
+class DryRunConflictModeTests(unittest.TestCase):
+    def _capturing_logger(self):
+        records = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        logger = logging.getLogger("test-dry-run-mode")
+        logger.setLevel(logging.DEBUG)
+        logger.handlers = [_Capture()]
+        logger.propagate = False
+        return logger, records
+
+    def _run_dry_conflict(self, mode):
+        logger, records = self._capturing_logger()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Imágenes").mkdir()
+            (folder / "Imágenes" / "foto.jpg").write_text("vieja")
+            src = folder / "foto.jpg"
+            src.write_text("nueva")
+            config = load_config(None)
+            config["conflict"] = mode
+            ext_map = build_extension_map(config["categories"])
+            moved = move_file(src, folder, config, ext_map, logger, dry_run=True)
+            self.assertTrue(src.exists(), "dry-run no debe mover nada")
+            self.assertEqual((folder / "Imágenes" / "foto.jpg").read_text(), "vieja")
+            return moved, records
+
+    def test_dry_run_rename_shows_new_name(self):
+        moved, records = self._run_dry_conflict("rename")
+        self.assertTrue(moved)
+        self.assertTrue(any(
+            "[DRY-RUN] CONFLICTO" in r and "foto_1.jpg" in r for r in records
+        ))
+
+    def test_dry_run_overwrite_says_it_would_overwrite(self):
+        _, records = self._run_dry_conflict("overwrite")
+        self.assertTrue(any(
+            "[DRY-RUN] CONFLICTO" in r and "sobrescribiría" in r for r in records
+        ))
+        self.assertFalse(any("foto_1.jpg" in r for r in records))
+
+    def test_dry_run_skip_says_it_would_skip(self):
+        _, records = self._run_dry_conflict("skip")
+        self.assertTrue(any(
+            "[DRY-RUN] CONFLICTO" in r and "saltaría" in r for r in records
+        ))
+        self.assertFalse(any("foto_1.jpg" in r for r in records))
+
+    def test_dry_run_ask_says_it_would_ask(self):
+        _, records = self._run_dry_conflict("ask")
+        self.assertTrue(any(
+            "[DRY-RUN] CONFLICTO" in r and "preguntaría" in r
+            and "foto_1.jpg" in r for r in records
+        ))
+
+    def test_dry_run_invalid_mode_raises(self):
+        logger, _ = self._capturing_logger()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Imágenes").mkdir()
+            (folder / "Imágenes" / "foto.jpg").write_text("vieja")
+            src = folder / "foto.jpg"
+            src.write_text("nueva")
+            config = load_config(None)
+            config["conflict"] = "typo"
+            ext_map = build_extension_map(config["categories"])
+            with self.assertRaises(ValueError):
+                move_file(src, folder, config, ext_map, logger, dry_run=True)
 
 
 class VersionTests(unittest.TestCase):
