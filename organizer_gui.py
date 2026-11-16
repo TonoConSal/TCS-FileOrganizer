@@ -3,6 +3,7 @@ organizer_gui.py - Interfaz gráfica para el organizador de archivos.
 Empaqueta junto a organizer.py y se compila con PyInstaller en un .exe.
 """
 
+import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, scrolledtext
@@ -16,7 +17,7 @@ import os
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 sys.path.insert(0, str(BASE_DIR))
 
-from organizer import __version__, load_config, build_extension_map, organize_folder, start_watcher, default_exclude, validate_config
+from organizer import __version__, UserCancelled, load_config, build_extension_map, organize_folder, start_watcher, default_exclude, resolve_log_path, validate_config
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
 C = {
@@ -73,17 +74,136 @@ class GUILogHandler(logging.Handler):
     def __init__(self, widget: scrolledtext.ScrolledText):
         super().__init__()
         self.widget = widget
+        self._queue = queue.Queue()
 
     def emit(self, record):
-        msg = self.format(record)
-        tag = self.TAG_MAP.get(record.levelname, "info")
-        self.widget.after(0, self._append, msg + "\n", tag)
+        # Solo encola el mensaje: nunca toca Tk desde el hilo que
+        # registra. El hilo de trabajo registra mucho (cada MOVIDO,
+        # cada CONFLICTO) y llamar a widget.after() desde ahí no es
+        # seguro: si la ventana se destruye mientras tanto, el after()
+        # se queda bloqueado para siempre y el proceso no termina.
+        # El hilo principal vacía la cola con drain().
+        try:
+            self._queue.put_nowait(
+                (self.format(record), self.TAG_MAP.get(record.levelname, "info"))
+            )
+        except Exception:
+            self.handleError(record)
+
+    def drain(self):
+        """Vacía la cola en el widget. Solo se llama desde el hilo principal."""
+        try:
+            while True:
+                msg, tag = self._queue.get_nowait()
+                self._append(msg + "\n", tag)
+        except queue.Empty:
+            pass
 
     def _append(self, msg, tag):
-        self.widget.config(state="normal")
-        self.widget.insert("end", msg, tag)
-        self.widget.see("end")
-        self.widget.config(state="disabled")
+        try:
+            self.widget.config(state="normal")
+            self.widget.insert("end", msg, tag)
+            self.widget.see("end")
+            self.widget.config(state="disabled")
+        except tk.TclError:
+            pass  # Ventana ya destruida (cierre en curso).
+
+
+# ── Diálogo de conflicto para el modo "ask" ───────────────────────────────────
+
+class ConflictAsker:
+    """Pregunta al usuario qué hacer ante un conflicto, en la ventana.
+
+    El hilo de trabajo llama a ask(src, dst); este programa el diálogo
+    en el hilo principal con after(0, ...) y espera a que el usuario
+    elija. Sin esto, resolve_conflict() usaría input() de consola, que
+    en el .exe no existe y mataría la organización con EOFError.
+
+    Devuelve "rename", "overwrite", "skip" o "cancel". Cerrar la
+    ventana con la X equivale a "skip": se salta ese archivo y la
+    corrida sigue.
+
+    Si la app se cierra mientras se espera una decisión, close()
+    despierta a ask() con "cancel": el hilo de trabajo aborta la
+    corrida con UserCancelled en vez de quedarse esperando para
+    siempre y dejar el proceso colgado.
+    """
+
+    def __init__(self, app):
+        self._app = app
+        self._done = threading.Event()
+        self._closing = threading.Event()
+        self._result = None
+        self._dialog = None
+
+    def ask(self, src, dst):
+        if self._closing.is_set():
+            return "cancel"
+        self._done.clear()
+        self._result = None
+        self._app.after(0, self._show_dialog, src, dst)
+        # Espera acotada: si la app se está cerrando, sale con "cancel"
+        # aunque el diálogo nunca se haya mostrado.
+        while not self._done.wait(timeout=0.2):
+            if self._closing.is_set():
+                return "cancel"
+        if self._closing.is_set() and self._result is None:
+            return "cancel"
+        return self._result
+
+    def close(self):
+        """Avisa que la app se está cerrando y despierta a ask()."""
+        self._closing.set()
+        if self._result is None:
+            self._result = "cancel"
+        self._done.set()
+
+    def _show_dialog(self, src, dst):
+        if self._closing.is_set():
+            self._done.set()
+            return
+        try:
+            dialog = tk.Toplevel(self._app)
+        except tk.TclError:
+            # La ventana principal ya no existe (cierre en curso).
+            self._done.set()
+            return
+        self._dialog = dialog
+        dialog.title("Conflicto al organizar")
+        dialog.configure(bg=C["bg"])
+        dialog.transient(self._app)
+        dialog.grab_set()
+
+        tk.Label(
+            dialog, text=f"'{src.name}' ya existe en '{dst.parent.name}'.",
+            bg=C["bg"], fg=C["text"], font=FONT_UI,
+        ).pack(anchor="w", padx=20, pady=(16, 4))
+        tk.Label(
+            dialog, text="¿Qué quieres hacer con el archivo nuevo?",
+            bg=C["bg"], fg=C["muted"], font=FONT_LABEL,
+        ).pack(anchor="w", padx=20, pady=(0, 12))
+
+        buttons = tk.Frame(dialog, bg=C["bg"])
+        buttons.pack(padx=20, pady=(0, 16))
+
+        def choose(value):
+            if self._closing.is_set():
+                return
+            self._result = value
+            self._dialog = None
+            dialog.destroy()
+            self._done.set()
+
+        styled_btn(buttons, "Renombrar", lambda: choose("rename"),
+                   width=12).pack(side="left", padx=(0, 6))
+        styled_btn(buttons, "Sobrescribir", lambda: choose("overwrite"),
+                   color="#7a5a2d", width=12).pack(side="left", padx=(0, 6))
+        styled_btn(buttons, "Saltar", lambda: choose("skip"),
+                   color=C["surface"], width=10).pack(side="left", padx=(0, 6))
+        styled_btn(buttons, "Cancelar", lambda: choose("cancel"),
+                   color=C["danger"], width=10).pack(side="left")
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: choose("skip"))
 
 
 # ── Ventana principal ─────────────────────────────────────────────────────────
@@ -96,11 +216,17 @@ class OrganizerApp(tk.Tk):
         self.configure(bg=C["bg"])
         self.resizable(False, False)
         self.geometry("580x620")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Estado
         self._watcher_thread: threading.Thread | None = None
         self._watching = False
         self._watcher_stop_event = threading.Event()
+        self._conflict_asker = ConflictAsker(self)
+        self._log_path = None
+        # Cola de actualizaciones de UI para los hilos de trabajo
+        # (ver _after_safe): nunca llaman a Tk directamente.
+        self._ui_queue = queue.Queue()
         self._folder = tk.StringVar()
         self._dry_run = tk.BooleanVar(value=False)
         self._conflict = tk.StringVar(value="ask")
@@ -225,7 +351,14 @@ class OrganizerApp(tk.Tk):
     def _setup_logger(self):
         self._logger = logging.getLogger("organizer")
         self._logger.setLevel(logging.DEBUG)
-        # Limpia handlers anteriores (si se recrea)
+        # Cerrar los handlers anteriores antes de limpiarlos: si no,
+        # el archivo del log queda abierto (en Windows, bloqueado) y
+        # nadie lo puede borrar o reemplazar después.
+        for handler in list(self._logger.handlers):
+            try:
+                handler.close()
+            except Exception:
+                pass
         self._logger.handlers.clear()
 
         gui_handler = GUILogHandler(self._log_widget)
@@ -233,6 +366,54 @@ class OrganizerApp(tk.Tk):
             logging.Formatter("[%(asctime)s] %(levelname)-8s %(message)s", "%H:%M:%S")
         )
         self._logger.addHandler(gui_handler)
+        self._gui_handler = gui_handler
+        # El hilo principal vacía las colas cada 100 ms: el log y las
+        # actualizaciones de UI que piden los hilos de trabajo.
+        self.after(100, self._drain_queues)
+
+    def _drain_queues(self):
+        """Vacía la cola del log y la de UI. Solo el hilo principal."""
+        try:
+            self._gui_handler.drain()
+        except tk.TclError:
+            return  # Ventana destruida: no reprogramar.
+        try:
+            while True:
+                func, args = self._ui_queue.get_nowait()
+                try:
+                    func(*args)
+                except tk.TclError:
+                    pass  # Widget destruido (cierre en curso).
+        except queue.Empty:
+            pass
+        try:
+            self.after(100, self._drain_queues)
+        except tk.TclError:
+            pass  # Ventana destruida (cierre en curso).
+
+    def _ensure_file_log(self, config):
+        """Añade el FileHandler del log a la GUI (opción D, tanda 2).
+
+        Antes la GUI no guardaba log en disco; ahora escribe en la
+        carpeta por defecto (AppData en Windows, ~/.local/share en
+        Linux) y deja la ruta en self._log_path para mostrarla en la
+        barra de estado. Se llama en el hilo principal, después de
+        leer la config de cada corrida, así que si la config cambia
+        el log, el handler se reemplaza.
+        """
+        log_path = resolve_log_path(config)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        for handler in list(self._logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                self._logger.removeHandler(handler)
+                handler.close()
+        fh = logging.FileHandler(log_path, encoding="utf-8")
+        fh.setFormatter(
+            logging.Formatter("[%(asctime)s] %(levelname)-8s %(message)s", "%H:%M:%S")
+        )
+        self._logger.addHandler(fh)
+        self._log_path = log_path
+        self._logger.info(f"Log guardado en: {log_path}")
 
     # ── Acciones ──────────────────────────────────────────────────────────────
 
@@ -297,20 +478,27 @@ class OrganizerApp(tk.Tk):
         # Capturar en el hilo principal todo lo que el hilo secundario
         # va a necesitar: no se lee ninguna variable Tkinter dentro de task().
         exclude = self._get_exclude(folder, config, self._get_config_path())
+        self._ensure_file_log(config)
 
         self._set_status("Organizando..." if not dry else "Simulando...", C["accent"])
         self._set_buttons_state("disabled")
 
         def task():
             try:
-                moved, skipped = organize_folder(folder, config, ext_map, self._logger, dry_run=dry, exclude=exclude)
-                msg = f"{'[Simulación] ' if dry else ''}Listo — {moved} movidos, {skipped} saltados."
-                self.after(0, self._set_status, msg, C["success"])
+                moved, skipped = organize_folder(
+                    folder, config, ext_map, self._logger, dry_run=dry,
+                    exclude=exclude, on_conflict=self._conflict_asker.ask,
+                )
+                msg = f"{'[Simulación] ' if dry else ''}Listo — {moved} movidos, {skipped} saltados. Log: {self._log_path}"
+                self._after_safe(self._set_status, msg, C["success"])
+            except UserCancelled:
+                self._after_safe(self._set_status, "Cancelado por el usuario.", C["warn"])
+                self._logger.info("Operación cancelada por el usuario.")
             except Exception as e:
-                self.after(0, self._set_status, f"Error: {e}", C["danger"])
+                self._after_safe(self._set_status, f"Error: {e}", C["danger"])
                 self._logger.error(str(e))
             finally:
-                self.after(0, self._set_buttons_state, "normal")
+                self._after_safe(self._set_buttons_state, "normal")
 
         threading.Thread(target=task, daemon=True).start()
 
@@ -339,13 +527,15 @@ class OrganizerApp(tk.Tk):
         # Capturar en el hilo principal todo lo que el hilo secundario
         # va a necesitar: no se lee ninguna variable Tkinter dentro de task().
         exclude = self._get_exclude(folder, config, self._get_config_path())
+        self._ensure_file_log(config)
+        dry = self._dry_run.get()
 
         # Reiniciamos la señal antes de iniciar un nuevo watcher.
         self._watcher_stop_event.clear()
 
         self._watching = True
         self._watch_btn.config(text="⏹  Detener watcher", bg=C["danger"])
-        self._set_status("Watcher activo — monitoreando cambios...", C["success"])
+        self._set_status(f"{'[Simulación] ' if dry else ''}Watcher activo — monitoreando cambios... Log: {self._log_path}", C["success"])
 
         def task():
             try:
@@ -356,31 +546,61 @@ class OrganizerApp(tk.Tk):
                     self._logger,
                     self._watcher_stop_event,
                     exclude=exclude,
+                    dry_run=dry,
                 )
             except Exception as e:
-                self.after(0, self._set_status,
+                self._after_safe(self._set_status,
                            f"Watcher error: {e}", C["danger"])
             finally:
                 self._watching = False
-                self.after(0, self._watch_btn.config,
+                self._after_safe(self._watch_btn.config,
                            {"text": "👁  Iniciar watcher", "bg": "#2d4a7a"})
-                self.after(0, self._set_status,
+                self._after_safe(self._set_status,
                            "Watcher detenido.", C["muted"])
 
         self._watcher_thread = threading.Thread(target=task, daemon=True)
         self._watcher_thread.start()
+    def _on_close(self):
+        """Cierre limpio: detiene el watcher y despierta cualquier
+        diálogo de conflicto pendiente, para que ningún hilo se quede
+        esperando para siempre y el proceso no quede colgado.
+
+        Sin esto, cerrar la ventana con un diálogo abierto dejaba al
+        hilo de trabajo bloqueado en ask() y la app no terminaba.
+        """
+        self._watcher_stop_event.set()
+        self._conflict_asker.close()
+        self.destroy()
+
+    def _after_safe(self, func, *args):
+        """Pide una actualización de UI desde un hilo de trabajo.
+
+        No llama a after() directamente: encolar es lo único seguro
+        desde otro hilo. Llamar a widget.after() desde el hilo de
+        trabajo se bloquea para siempre si la ventana se destruyó
+        mientras tanto (lo mismo que le pasaba a GUILogHandler.emit).
+        El hilo principal ejecuta lo encolado en _drain_queues().
+        """
+        self._ui_queue.put_nowait((func, args))
+
     def _clear_log(self):
         self._log_widget.config(state="normal")
         self._log_widget.delete("1.0", "end")
         self._log_widget.config(state="disabled")
 
     def _set_status(self, msg, color=None):
-        self._status.config(text=msg, fg=color or C["muted"])
+        try:
+            self._status.config(text=msg, fg=color or C["muted"])
+        except tk.TclError:
+            pass  # Ventana ya destruida (cierre en curso).
 
     def _set_buttons_state(self, state):
-        for widget in self.winfo_children():
-            if isinstance(widget, tk.Button):
-                widget.config(state=state)
+        try:
+            for widget in self.winfo_children():
+                if isinstance(widget, tk.Button):
+                    widget.config(state=state)
+        except tk.TclError:
+            pass  # Ventana ya destruida (cierre en curso).
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

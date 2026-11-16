@@ -83,7 +83,7 @@ El paquete está destinado a sistemas de arquitectura AMD64 (x86_64).
 | Modo simulación | Muestra qué archivos se organizarían sin moverlos. |
 | Watcher | Supervisa la carpeta y organiza los archivos nuevos automáticamente. |
 
-> **Nota:** la opción **Preguntar** solo funciona si la GUI se lanzó desde una terminal. En el `.exe` (sin consola), un conflicto con **Preguntar** detiene la organización con un error; en ese caso usa **Renombrar**. El watcher nunca pregunta: si el modo es **Preguntar**, usa **Renombrar** automáticamente (ver la sección de CLI más abajo).
+> **Nota:** en la GUI, la opción **Preguntar** abre un diálogo en la ventana con Renombrar / Sobrescribir / Saltar / Cancelar (Cancelar aborta la corrida sin cerrar la app), así que funciona también en el `.exe` sin consola. El watcher nunca pregunta: si el modo es **Preguntar**, usa **Renombrar** automáticamente (ver la sección de CLI más abajo).
 
 ---
 
@@ -177,7 +177,7 @@ python organizer.py ~/Descargas --watch --config mi_config.toml
 
 > **Watcher y modo Preguntar:** el watcher es desatendido y no puede preguntar. Si el modo de conflicto es `ask`, el watcher usa `rename` automáticamente (nunca sobrescribe nada) y lo avisa en el log. Esto aplica igual a la CLI (`--watch`) y a la GUI.
 >
-> Con `--watch --dry-run` solo se simula la organización inicial y no se inicia el watcher.
+> Con `--watch --dry-run` el watcher sí se inicia, pero solo simula: registra lo que movería sin mover nada. En un conflicto de simulación el log dice lo que haría según el modo: con renombrar muestra el nombre que quedaría (`[DRY-RUN] CONFLICTO → foto.jpg → Imágenes/foto_1.jpg`), con sobrescribir o saltar lo dice, y con preguntar avisa que preguntaría.
 
 ---
 
@@ -223,6 +223,8 @@ Ejemplo de configuración TOML:
 
 Puedes encontrar archivos de configuración de ejemplo en el repositorio.
 
+Las categorías de tu archivo se **suman** a las de por defecto: si agregas `".avif"` a `"Imágenes"`, esa categoría sigue teniendo `.jpg`, `.png`, etc. Para **quitar** una categoría, ponla con una lista vacía: `"Torrents" = []`.
+
 La configuración personalizada se carga desde la interfaz gráfica o mediante el argumento `--config` en la CLI.
 
 ---
@@ -247,9 +249,7 @@ La interfaz gráfica muestra las operaciones en tiempo real mediante diferentes 
 - Errores.
 - Información de depuración.
 
-La versión CLI genera un archivo `organizer.log` dentro de la carpeta organizada, con líneas como `MOVIDO  foto.jpg  →  Imágenes/foto_1.jpg` y `CONFLICTO → foto.jpg ya existe, renombrado a foto_1.jpg`. Ese log nunca se mueve a otra categoría, aunque esté dentro de la carpeta que organizas.
-
-La GUI **no guarda el log en archivo**: solo lo muestra en la sección **Actividad** de la ventana. Si ya existe un `organizer.log` en la carpeta, la GUI tampoco lo mueve.
+Tanto la CLI como la GUI guardan el log en un archivo `organizer.log` en la carpeta estándar de datos de la aplicación: `%APPDATA%\TCS-FileOrganizer` en Windows y `~/.local/share/TCS-FileOrganizer` en Linux (macOS: `~/Library/Application Support/TCS-FileOrganizer`). Así el log ya no se crea dentro de la carpeta que organizas. Si en la config pones una ruta absoluta en `log_file`, esa ruta gana. Al terminar, la CLI imprime la ruta del log y la GUI la muestra en la barra de estado. El log tiene líneas como `MOVIDO  foto.jpg  →  Imágenes/foto_1.jpg` y `CONFLICTO → foto.jpg ya existe, renombrado a foto_1.jpg`. Un `organizer.log` viejo que quede dentro de la carpeta (de la versión 2.5.1 o anterior) nunca se mueve a otra categoría.
 
 ---
 
