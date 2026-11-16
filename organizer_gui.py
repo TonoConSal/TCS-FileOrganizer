@@ -16,7 +16,7 @@ import os
 BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 sys.path.insert(0, str(BASE_DIR))
 
-from organizer import load_config, build_extension_map, organize_folder, start_watcher, default_exclude, validate_config
+from organizer import __version__, load_config, build_extension_map, organize_folder, start_watcher, default_exclude, validate_config
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
 C = {
@@ -118,7 +118,7 @@ class OrganizerApp(tk.Tk):
         header.pack_propagate(False)
         tk.Label(header, text="📁  File Organizer", bg=C["surface"],
                  fg=C["text"], font=FONT_TITLE).pack(side="left", padx=20, pady=14)
-        tk.Label(header, text="v2.5", bg=C["surface"],
+        tk.Label(header, text=f"v{__version__}", bg=C["surface"],
                  fg=C["muted"], font=FONT_LABEL).pack(side="right", padx=20)
 
         # ── Carpeta objetivo

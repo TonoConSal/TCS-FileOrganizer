@@ -5,6 +5,7 @@ Se corren con:
 """
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from organizer import (  # noqa: E402
     DEFAULT_CONFIG,
+    __version__,
     build_extension_map,
     default_exclude,
     load_config,
@@ -452,6 +454,21 @@ class WatcherConfigTests(unittest.TestCase):
                 any("CONFLICTO" in r and "foto_1.jpg" in r for r in records),
                 f"falta el log de conflicto: {records}",
             )
+
+
+class VersionTests(unittest.TestCase):
+    def test_version_is_semver(self):
+        # La versión es la única fuente para el tag de la GUI y debe
+        # coincidir con el tag del release (vX.Y.Z).
+        self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+
+    def test_gui_label_uses_version_not_hardcoded(self):
+        # La etiqueta de la GUI debe leer __version__, no un "v2.5"
+        # fijo que se quede atrás en el siguiente release.
+        repo = Path(__file__).resolve().parent.parent
+        gui_source = (repo / "organizer_gui.py").read_text(encoding="utf-8")
+        self.assertIn('f"v{__version__}"', gui_source)
+        self.assertNotIn('"v2.5"', gui_source)
 
 
 if __name__ == "__main__":
