@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -17,6 +18,8 @@ from organizer import (  # noqa: E402
     default_exclude,
     load_config,
     organize_folder,
+    prompt_conflict_mode,
+    prompt_folder,
     resolve_conflict,
     unique_path,
     validate_config,
@@ -232,6 +235,54 @@ class RenameLogTests(unittest.TestCase):
                 any("MOVIDO" in r and "Imágenes/foto_1.jpg" in r for r in records),
                 f"el log MOVIDO debe incluir el nombre final: {records}",
             )
+
+
+class CliPromptTests(unittest.TestCase):
+    def test_prompt_folder_accepts_typed_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            with mock.patch("organizer.input", return_value=str(folder)):
+                self.assertEqual(prompt_folder(Path("/no/existe")), folder)
+
+    def test_prompt_folder_empty_accepts_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            with mock.patch("organizer.input", return_value=""):
+                self.assertEqual(prompt_folder(folder), folder)
+
+    def test_prompt_folder_reasks_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            with mock.patch(
+                "organizer.input",
+                side_effect=["/no/existe/seguro", str(folder)],
+            ):
+                self.assertEqual(prompt_folder(folder), folder)
+
+    def test_prompt_folder_eof_exits_without_organizing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("organizer.input", side_effect=EOFError):
+                with self.assertRaises(SystemExit):
+                    prompt_folder(Path(tmp))
+
+    def test_prompt_conflict_mode_accepts_typed_mode(self):
+        with mock.patch("organizer.input", return_value="rename"):
+            self.assertEqual(prompt_conflict_mode("ask"), "rename")
+
+    def test_prompt_conflict_mode_empty_keeps_default(self):
+        with mock.patch("organizer.input", return_value=""):
+            self.assertEqual(prompt_conflict_mode("ask"), "ask")
+
+    def test_prompt_conflict_mode_reasks_when_invalid(self):
+        with mock.patch(
+            "organizer.input", side_effect=["typo", "skip"]
+        ):
+            self.assertEqual(prompt_conflict_mode("ask"), "skip")
+
+    def test_prompt_conflict_mode_eof_exits(self):
+        with mock.patch("organizer.input", side_effect=EOFError):
+            with self.assertRaises(SystemExit):
+                prompt_conflict_mode("ask")
 
 
 if __name__ == "__main__":

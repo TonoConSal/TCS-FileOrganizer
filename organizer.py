@@ -6,6 +6,10 @@ Uso:
     python organizer.py [carpeta] --watch       # Modo watcher (corre indefinidamente)
     python organizer.py [carpeta] --dry-run     # Simula sin mover nada
     python organizer.py --config mi_config.toml # Usa config personalizada
+
+Sin carpeta ni --no-prompt, en una terminal interactiva el programa
+pregunta al inicio qué carpeta organizar y qué modo de conflicto usar,
+en vez de organizar Descargas/Downloads sin avisar.
 """
 
 import argparse
@@ -459,6 +463,50 @@ def start_watcher(
 
 
 
+# ── Preguntas iniciales del CLI ─────────────────────────────────────────────
+
+def _default_downloads_folder() -> Path:
+    """Descargas (es_MX) si existe, si no Downloads. Puede no existir."""
+    candidates = [Path.home() / "Descargas", Path.home() / "Downloads"]
+    return next((p for p in candidates if p.exists()), candidates[1])
+
+
+def prompt_folder(default: Path) -> Path:
+    """Pregunta qué carpeta organizar. Enter acepta la sugerida.
+
+    Vuelve a preguntar si la ruta no existe. Si no hay entrada
+    (EOF) o se cancela con Ctrl+C, sale sin organizar nada.
+    """
+    while True:
+        try:
+            answer = input(f"Carpeta a organizar [{default}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n[!] Operación cancelada.")
+            raise SystemExit(1)
+        folder = Path(answer).expanduser().resolve() if answer else default.resolve()
+        if folder.exists():
+            return folder
+        print(f"[!] La carpeta no existe: {folder}")
+
+
+def prompt_conflict_mode(default: str) -> str:
+    """Pregunta el modo de conflicto. Enter acepta el de la config."""
+    modes = sorted(VALID_CONFLICT_MODES)
+    while True:
+        try:
+            answer = input(
+                f"Modo de conflicto {modes} [{default}]: "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n[!] Operación cancelada.")
+            raise SystemExit(1)
+        if not answer:
+            return default
+        if answer in VALID_CONFLICT_MODES:
+            return answer
+        print(f"[!] Modo no válido: {answer!r} (usa {', '.join(modes)})")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -471,7 +519,21 @@ def main():
         "folder",
         nargs="?",
         default=None,
-        help="Carpeta a organizar (por defecto: ~/Downloads o ~/Descargas)",
+        help="Carpeta a organizar. Si no se pasa, se pregunta al inicio "
+        "(sugerida: ~/Descargas o ~/Downloads)",
+    )
+    parser.add_argument(
+        "--conflict",
+        choices=sorted(VALID_CONFLICT_MODES),
+        default=None,
+        help="Modo de conflicto: ask, rename, skip u overwrite. "
+        "Si no se pasa, se pregunta al inicio en terminal interactiva",
+    )
+    parser.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help="No preguntar nada al inicio: usa la carpeta y el modo de "
+        "la config (para scripts y automatización)",
     )
     parser.add_argument(
         "--watch", "-w",
@@ -492,24 +554,34 @@ def main():
 
     args = parser.parse_args()
 
-    # Detectar carpeta
-    if args.folder:
-        folder = Path(args.folder).expanduser().resolve()
-    else:
-        # Intenta Descargas (es_MX) primero, luego Downloads
-        candidates = [Path.home() / "Descargas", Path.home() / "Downloads"]
-        folder = next((p for p in candidates if p.exists()), candidates[1])
-
-    if not folder.exists():
-        print(f"[!] La carpeta no existe: {folder}")
-        sys.exit(1)
-
     config = load_config(args.config)
     try:
         validate_config(config)
     except ValueError as exc:
         print(f"[!] Config no válida: {exc}")
         sys.exit(1)
+
+    # Carpeta a organizar: argumento, o pregunta al inicio en terminal
+    # interactiva. Sin terminal (scripts, tuberías) o con --no-prompt,
+    # se usa la carpeta de Descargas de siempre, sin preguntar.
+    interactive = sys.stdin.isatty() and not args.no_prompt
+    if args.folder:
+        folder = Path(args.folder).expanduser().resolve()
+    elif interactive:
+        folder = prompt_folder(_default_downloads_folder())
+    else:
+        folder = _default_downloads_folder()
+
+    if not folder.exists():
+        print(f"[!] La carpeta no existe: {folder}")
+        sys.exit(1)
+
+    # Modo de conflicto: flag, o pregunta al inicio en terminal
+    # interactiva. Sin terminal o con --no-prompt, se usa el de la config.
+    if args.conflict:
+        config["conflict"] = args.conflict
+    elif interactive:
+        config["conflict"] = prompt_conflict_mode(config["conflict"])
 
     log_path = folder / config["log_file"]
     logger = setup_logging(log_path)
@@ -520,6 +592,7 @@ def main():
 
     logger.info(f"=== Organizer iniciado {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
     logger.info(f"Carpeta objetivo: {folder}")
+    logger.info(f"Modo de conflicto: {config['conflict']}")
     if args.config:
         logger.info(f"Config cargada desde: {args.config}")
 
