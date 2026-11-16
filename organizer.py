@@ -193,14 +193,18 @@ def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger) ->
         logger.warning(f"SKIP (ya existe) → {dst.name}")
         return None
     elif mode == "rename":
-        return unique_path(dst)
+        renamed = unique_path(dst)
+        logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
+        return renamed
     elif mode == "ask":
         print(f"\n⚠️  Conflicto: '{dst.name}' ya existe en '{dst.parent}'")
         print("   [r] Renombrar  [o] Sobreescribir  [s] Saltar  [q] Salir")
         while True:
             resp = input("   Tu elección: ").strip().lower()
             if resp == "r":
-                return unique_path(dst)
+                renamed = unique_path(dst)
+                logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
+                return renamed
             elif resp == "o":
                 return dst
             elif resp == "s":
@@ -337,7 +341,7 @@ def move_file(
 
     dest_folder.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(final_dest))
-    logger.info(f"MOVIDO  {src.name}  →  {category}/")
+    logger.info(f"MOVIDO  {src.name}  →  {category}/{final_dest.name}")
     return True
 
 

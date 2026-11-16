@@ -194,5 +194,45 @@ class OrganizeFolderTests(unittest.TestCase):
             self.assertEqual(moved, 1)
 
 
+class RenameLogTests(unittest.TestCase):
+    def test_rename_conflict_logs_final_name(self):
+        """El log debe decir que hubo conflicto y con qué nombre quedó.
+
+        Antes solo decía 'MOVIDO foto.jpg → Imágenes/' aunque el
+        archivo real quedaba como foto_1.jpg.
+        """
+        records = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        logger = logging.getLogger("test-rename-log")
+        logger.setLevel(logging.DEBUG)
+        logger.handlers = [_Capture()]
+        logger.propagate = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "Imágenes").mkdir()
+            (folder / "Imágenes" / "foto.jpg").write_text("vieja")
+            (folder / "foto.jpg").write_text("nueva")
+            config = load_config(None)
+            config["conflict"] = "rename"
+            ext_map = build_extension_map(config["categories"])
+            moved, _ = organize_folder(folder, config, ext_map, logger)
+
+            self.assertEqual(moved, 1)
+            self.assertTrue((folder / "Imágenes" / "foto_1.jpg").exists())
+            self.assertTrue(
+                any("CONFLICTO" in r and "foto_1.jpg" in r for r in records),
+                f"falta el log de conflicto con el nombre final: {records}",
+            )
+            self.assertTrue(
+                any("MOVIDO" in r and "Imágenes/foto_1.jpg" in r for r in records),
+                f"el log MOVIDO debe incluir el nombre final: {records}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
