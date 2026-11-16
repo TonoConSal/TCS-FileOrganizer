@@ -289,6 +289,22 @@ class CliPromptTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 prompt_conflict_mode("ask")
 
+    @staticmethod
+    def _fake_home_env(home: Path) -> dict:
+        """Entorno que redirige Path.home() en Linux y en Windows.
+
+        En Linux, Path.home() usa HOME; en Windows lo ignora desde
+        Python 3.8 y usa USERPROFILE (o HOMEDRIVE+HOMEPATH). Si solo
+        se pone HOME, en Windows el programa organiza las Descargas
+        reales del usuario en vez de la carpeta temporal del test.
+        """
+        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+        drive, tail = os.path.splitdrive(str(home))
+        if drive:
+            env["HOMEDRIVE"] = drive
+            env["HOMEPATH"] = tail or "\\"
+        return env
+
     def test_main_prompts_even_when_stdin_is_not_a_tty(self):
         """El Run de un IDE (stdin por tubería) también debe preguntar.
 
@@ -304,7 +320,7 @@ class CliPromptTests(unittest.TestCase):
             chosen = Path(tmp) / "elegida"
             chosen.mkdir()
             (chosen / "foto.jpg").write_text("x")
-            env = dict(os.environ, HOME=str(home))
+            env = self._fake_home_env(home)
             result = subprocess.run(
                 [sys.executable, str(repo / "organizer.py")],
                 input=f"{chosen}\nrename\n",
@@ -326,7 +342,7 @@ class CliPromptTests(unittest.TestCase):
             downloads = home / "Downloads"
             downloads.mkdir(parents=True)
             (downloads / "decoy.txt").write_text("decoy")
-            env = dict(os.environ, HOME=str(home))
+            env = self._fake_home_env(home)
             result = subprocess.run(
                 [sys.executable, str(repo / "organizer.py")],
                 input="",
@@ -346,7 +362,7 @@ class CliPromptTests(unittest.TestCase):
             downloads = home / "Downloads"
             downloads.mkdir(parents=True)
             (downloads / "decoy.txt").write_text("decoy")
-            env = dict(os.environ, HOME=str(home))
+            env = self._fake_home_env(home)
             result = subprocess.run(
                 [sys.executable, str(repo / "organizer.py"), "--no-prompt"],
                 input="",
@@ -357,7 +373,11 @@ class CliPromptTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotIn("Carpeta a organizar", result.stdout)
-            self.assertTrue((downloads / "Documentos" / "decoy.txt").exists())
+            self.assertTrue(
+                (downloads / "Documentos" / "decoy.txt").exists(),
+                "decoy no quedó en Documentos; contenido de Downloads: "
+                f"{sorted(str(p.relative_to(downloads)) for p in downloads.rglob('*'))}",
+            )
 
 
 class WatcherConfigTests(unittest.TestCase):
