@@ -10,8 +10,28 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Run tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
   build-windows:
     name: Build Windows executable
+    needs: test
     runs-on: windows-latest
 
     steps:
@@ -37,6 +57,7 @@ jobs:
 
   build-linux:
     name: Build Debian package
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
