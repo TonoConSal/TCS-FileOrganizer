@@ -3,6 +3,8 @@
 Se corren con:
     python -m unittest discover -s tests -v
 """
+import ast
+import io
 import json
 import logging
 import os
@@ -337,6 +339,25 @@ class AskCallbackTests(unittest.TestCase):
                 result = resolve_conflict(src, dst, "ask", _logger())
             self.assertEqual(result.name, "foto_1.jpg")
 
+    def test_ask_console_fallback_works_with_cp1252_stdout(self):
+        # Regresión del release v2.6.0: el runner de Windows usa la
+        # consola clásica (cp1252) y el print del conflicto llevaba un
+        # emoji que cp1252 no puede codificar -> UnicodeEncodeError y
+        # la corrida moría. En una consola UTF-8 (la de Fer) pasaba.
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._conflict_setup(tmp)
+            src = folder / "foto.jpg"
+            dst = folder / "Imágenes" / "foto.jpg"
+            buf = io.BytesIO()
+            cp1252_out = io.TextIOWrapper(buf, encoding="cp1252", errors="strict")
+            with mock.patch("organizer.input", return_value="r"), \
+                    mock.patch("sys.stdout", cp1252_out):
+                result = resolve_conflict(src, dst, "ask", _logger())
+            cp1252_out.flush()
+            cp1252_out.detach()
+            self.assertEqual(result.name, "foto_1.jpg")
+            self.assertIn("Conflicto", buf.getvalue().decode("cp1252"))
+
     def test_ask_cancel_aborts_run_leaving_files_in_place(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = self._conflict_setup(tmp)
@@ -361,6 +382,44 @@ class AskCallbackTests(unittest.TestCase):
                                        on_conflict=lambda s, d: "rename")
             self.assertEqual(moved, 1)
             self.assertTrue((folder / "Imágenes" / "foto_1.jpg").exists())
+
+
+class CliOutputEncodingTests(unittest.TestCase):
+    """Toda la salida del CLI debe caber en cp1252.
+
+    El runner de Windows (y cualquier consola clásica) usa cp1252:
+    un emoji o una flecha '→' en un print() o en un mensaje de log
+    tumba el programa con UnicodeEncodeError. Los acentos españoles
+    sí están en cp1252, así que esos se quedan. La GUI no entra aquí:
+    Tk maneja Unicode sin problema y sus emojis se quedan.
+    """
+
+    def test_all_cli_output_strings_are_cp1252_safe(self):
+        src = Path(__file__).resolve().parent.parent / "organizer.py"
+        tree = ast.parse(src.read_text(encoding="utf-8"))
+        bad = []
+
+        def check(node, where):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                try:
+                    node.value.encode("cp1252")
+                except UnicodeEncodeError:
+                    bad.append(f"{where}: {node.value[:60]!r}")
+            elif isinstance(node, ast.JoinedStr):
+                for part in node.values:
+                    check(part, where)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name in {"print", "input", "debug", "info", "warning",
+                        "error", "exception", "critical"}:
+                for arg in node.args:
+                    check(arg, f"línea {node.lineno} ({name})")
+        self.assertEqual(bad, [],
+                         "cadenas de salida que cp1252 no puede codificar")
 
 
 class CliPromptTests(unittest.TestCase):

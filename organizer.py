@@ -286,27 +286,27 @@ def resolve_conflict(src: Path, dst: Path, mode: str, logger: logging.Logger,
     if mode == "overwrite":
         return dst
     elif mode == "skip":
-        logger.warning(f"SKIP (ya existe) → {dst.name}")
+        logger.warning(f"SKIP (ya existe) -> {dst.name}")
         return None
     elif mode == "rename":
         renamed = unique_path(dst)
-        logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
+        logger.info(f"CONFLICTO -> {dst.name} ya existe, renombrado a {renamed.name}")
         return renamed
     elif mode == "ask":
         if on_conflict is not None:
             return _resolve_conflict_asked(src, dst, logger, on_conflict)
-        print(f"\n⚠️  Conflicto: '{dst.name}' ya existe en '{dst.parent}'")
+        print(f"\n[!] Conflicto: '{dst.name}' ya existe en '{dst.parent}'")
         print("   [r] Renombrar  [o] Sobreescribir  [s] Saltar  [q] Salir")
         while True:
             resp = input("   Tu elección: ").strip().lower()
             if resp == "r":
                 renamed = unique_path(dst)
-                logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
+                logger.info(f"CONFLICTO -> {dst.name} ya existe, renombrado a {renamed.name}")
                 return renamed
             elif resp == "o":
                 return dst
             elif resp == "s":
-                logger.warning(f"SKIP (usuario) → {dst.name}")
+                logger.warning(f"SKIP (usuario) -> {dst.name}")
                 return None
             elif resp == "q":
                 logger.info("Usuario canceló la operación.")
@@ -344,12 +344,12 @@ def _resolve_conflict_asked(src: Path, dst: Path, logger: logging.Logger,
     choice = _CONFLICT_CHOICES.get(str(raw).strip().lower())
     if choice == "rename":
         renamed = unique_path(dst)
-        logger.info(f"CONFLICTO → {dst.name} ya existe, renombrado a {renamed.name}")
+        logger.info(f"CONFLICTO -> {dst.name} ya existe, renombrado a {renamed.name}")
         return renamed
     if choice == "overwrite":
         return dst
     if choice == "skip":
-        logger.warning(f"SKIP (usuario) → {dst.name}")
+        logger.warning(f"SKIP (usuario) -> {dst.name}")
         return None
     if choice == "cancel":
         logger.info("Usuario canceló la operación.")
@@ -487,7 +487,7 @@ def move_file(
     dest_file = dest_folder / src.name
 
     if dest_file == src:
-        logger.debug(f"YA EN LUGAR CORRECTO → {src.name}")
+        logger.debug(f"YA EN LUGAR CORRECTO -> {src.name}")
         return False
 
     # Conflicto
@@ -500,14 +500,14 @@ def move_file(
             mode = config["conflict"]
             if mode == "rename":
                 renamed = unique_path(dest_file)
-                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → {category}/{renamed.name}")
+                logger.info(f"[DRY-RUN] CONFLICTO -> {src.name} -> {category}/{renamed.name}")
             elif mode == "overwrite":
-                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → {category}/{dest_file.name} (sobrescribiría)")
+                logger.info(f"[DRY-RUN] CONFLICTO -> {src.name} -> {category}/{dest_file.name} (sobrescribiría)")
             elif mode == "skip":
-                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → saltaría (ya existe en {category}/)")
+                logger.info(f"[DRY-RUN] CONFLICTO -> {src.name} -> saltaría (ya existe en {category}/)")
             elif mode == "ask":
                 renamed = unique_path(dest_file)
-                logger.info(f"[DRY-RUN] CONFLICTO → {src.name} → preguntaría (renombrar sería {category}/{renamed.name})")
+                logger.info(f"[DRY-RUN] CONFLICTO -> {src.name} -> preguntaría (renombrar sería {category}/{renamed.name})")
             else:
                 raise ValueError(
                     f"Modo de conflicto no válido: {mode!r} "
@@ -519,12 +519,12 @@ def move_file(
             return False
 
     if dry_run:
-        logger.info(f"[DRY-RUN] {src.name}  →  {category}/")
+        logger.info(f"[DRY-RUN] {src.name}  ->  {category}/")
         return True
 
     dest_folder.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(final_dest))
-    logger.info(f"MOVIDO  {src.name}  →  {category}/{final_dest.name}")
+    logger.info(f"MOVIDO  {src.name}  ->  {category}/{final_dest.name}")
     return True
 
 
@@ -653,7 +653,7 @@ def start_watcher(
     observer.schedule(handler, str(folder), recursive=False)
     observer.start()
 
-    logger.info(f"{'[DRY-RUN] ' if dry_run else ''}👁️ Watcher activo en '{folder}'.")
+    logger.info(f"{'[DRY-RUN] ' if dry_run else ''}Watcher activo en '{folder}'.")
 
     try:
         while not stop_event.is_set():
