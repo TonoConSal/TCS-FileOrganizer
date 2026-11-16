@@ -351,7 +351,14 @@ class OrganizerApp(tk.Tk):
     def _setup_logger(self):
         self._logger = logging.getLogger("organizer")
         self._logger.setLevel(logging.DEBUG)
-        # Limpia handlers anteriores (si se recrea)
+        # Cerrar los handlers anteriores antes de limpiarlos: si no,
+        # el archivo del log queda abierto (en Windows, bloqueado) y
+        # nadie lo puede borrar o reemplazar después.
+        for handler in list(self._logger.handlers):
+            try:
+                handler.close()
+            except Exception:
+                pass
         self._logger.handlers.clear()
 
         gui_handler = GUILogHandler(self._log_widget)

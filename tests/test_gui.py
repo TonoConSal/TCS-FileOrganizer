@@ -198,6 +198,9 @@ class GuiAppTests(unittest.TestCase):
                 self.assertTrue(Path(tmp, "dos.log").exists())
                 # Al cerrar un FileHandler, su stream queda en None.
                 self.assertIsNone(first[0].stream, "el handler viejo debe cerrarse")
+                # Cerrar los handlers antes de borrar la carpeta: en
+                # Windows no se puede borrar un archivo abierto.
+                _close_organizer_logger()
         finally:
             app.destroy()
 
@@ -210,7 +213,13 @@ class GuiAppTests(unittest.TestCase):
             (folder / "Imágenes").mkdir(parents=True)
             (folder / "Imágenes" / "foto.jpg").write_text("vieja")
             (folder / "foto.jpg").write_text("nueva")
-            log_file = home / ".local" / "share" / "TCS-FileOrganizer" / "organizer.log"
+            # En Windows el log va a %APPDATA%, en Linux a ~/.local/share.
+            appdata = Path(tmp) / "appdata"
+            log_file = (
+                appdata / "TCS-FileOrganizer" / "organizer.log"
+                if os.name == "nt"
+                else home / ".local" / "share" / "TCS-FileOrganizer" / "organizer.log"
+            )
 
             closed = []
             app = OrganizerApp()
@@ -224,7 +233,7 @@ class GuiAppTests(unittest.TestCase):
                 else:
                     app.after(100, step)
 
-            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            with mock.patch.dict(os.environ, {"HOME": str(home), "APPDATA": str(appdata)}):
                 os.environ.pop("XDG_DATA_HOME", None)
                 app.after(200, lambda: (app._run_once(), app.after(200, step)))
                 app.after(15000, app.destroy)  # no colgar el test
@@ -245,6 +254,9 @@ class GuiAppTests(unittest.TestCase):
                 "Operación cancelada",
                 log_file.read_text(encoding="utf-8", errors="ignore"),
             )
+            # Cerrar los handlers antes de borrar la carpeta: en
+            # Windows no se puede borrar un archivo abierto.
+            _close_organizer_logger()
 
     def test_status_bar_shows_log_path_after_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,6 +264,8 @@ class GuiAppTests(unittest.TestCase):
             folder = Path(tmp) / "prueba"
             folder.mkdir(parents=True)
             (folder / "foto.jpg").write_text("x")
+            # APPDATA temporal para que en Windows el log no toque el real.
+            appdata = Path(tmp) / "appdata"
 
             app = OrganizerApp()
             app._folder.set(str(folder))
@@ -267,7 +281,7 @@ class GuiAppTests(unittest.TestCase):
                 else:
                     app.after(100, check)
 
-            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            with mock.patch.dict(os.environ, {"HOME": str(home), "APPDATA": str(appdata)}):
                 os.environ.pop("XDG_DATA_HOME", None)
                 app.after(200, lambda: (app._run_once(), app.after(200, check)))
                 app.after(15000, app.destroy)  # no colgar el test
@@ -275,6 +289,9 @@ class GuiAppTests(unittest.TestCase):
 
             self.assertTrue(seen, "la corrida nunca llegó a 'Listo'")
             self.assertTrue((folder / "Imágenes" / "foto.jpg").exists())
+            # Cerrar los handlers antes de borrar la carpeta: en
+            # Windows no se puede borrar un archivo abierto.
+            _close_organizer_logger()
 
 
 if __name__ == "__main__":

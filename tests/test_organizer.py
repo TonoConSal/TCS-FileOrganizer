@@ -507,11 +507,19 @@ class CliPromptTests(unittest.TestCase):
 
 
 class LogDirTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "XDG solo aplica en Linux")
     def test_default_log_dir_uses_xdg_data_home(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp}):
                 self.assertEqual(default_log_dir(), Path(tmp) / "TCS-FileOrganizer")
 
+    @unittest.skipUnless(os.name == "nt", "APPDATA solo aplica en Windows")
+    def test_default_log_dir_uses_appdata_on_windows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"APPDATA": tmp}):
+                self.assertEqual(default_log_dir(), Path(tmp) / "TCS-FileOrganizer")
+
+    @unittest.skipIf(os.name == "nt", "la ruta ~/.local/share solo aplica en Linux")
     def test_default_log_dir_falls_back_to_local_share(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
@@ -521,14 +529,29 @@ class LogDirTests(unittest.TestCase):
                 # Path.home() usa HOME en Linux
                 self.assertEqual(default_log_dir(), home / ".local" / "share" / "TCS-FileOrganizer")
 
+    @unittest.skipUnless(os.name == "nt", "solo en Windows")
+    def test_default_log_dir_falls_back_to_roaming_on_windows(self):
+        # Sin APPDATA, se usa ~/AppData/Roaming (Path.home() en
+        # Windows usa USERPROFILE, no HOME).
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            with mock.patch.dict(os.environ, {"USERPROFILE": str(home)}):
+                os.environ.pop("APPDATA", None)
+                self.assertEqual(default_log_dir(), home / "AppData" / "Roaming" / "TCS-FileOrganizer")
+
     def test_resolve_log_path_relative_goes_to_default_dir(self):
         config = load_config(None)
         self.assertEqual(resolve_log_path(config), default_log_dir() / "organizer.log")
 
     def test_resolve_log_path_absolute_wins(self):
-        config = load_config(None)
-        config["log_file"] = "/tmp/mis-logs/otro.log"
-        self.assertEqual(resolve_log_path(config), Path("/tmp/mis-logs/otro.log"))
+        # Una ruta absoluta de verdad (con letra de unidad en Windows):
+        # "/tmp/..." no es absoluta en Windows (no tiene unidad).
+        with tempfile.TemporaryDirectory() as tmp:
+            abs_log = Path(tmp) / "mis-logs" / "otro.log"
+            config = load_config(None)
+            config["log_file"] = str(abs_log)
+            self.assertEqual(resolve_log_path(config), abs_log)
 
     def test_resolve_log_path_without_log_file_uses_default(self):
         self.assertEqual(resolve_log_path({}), default_log_dir() / "organizer.log")
@@ -549,7 +572,13 @@ class LogDirTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             log_dir = Path(tmp) / "logs"
-            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(log_dir)}):
+            # En Windows la carpeta base es %APPDATA%, en Linux XDG.
+            env_patch = (
+                {"APPDATA": str(log_dir)}
+                if os.name == "nt"
+                else {"XDG_DATA_HOME": str(log_dir)}
+            )
+            with mock.patch.dict(os.environ, env_patch):
                 config = load_config(None)
                 excluded = default_exclude(folder, config)
                 self.assertIn((log_dir / "TCS-FileOrganizer" / "organizer.log"), excluded)
@@ -563,6 +592,9 @@ class LogDirTests(unittest.TestCase):
             (downloads / "decoy.txt").write_text("decoy")
             env = CliPromptTests._fake_home_env(home)
             env.pop("XDG_DATA_HOME", None)
+            # En Windows el log va a %APPDATA%, en Linux a ~/.local/share.
+            appdata = Path(tmp) / "appdata"
+            env["APPDATA"] = str(appdata)
             result = subprocess.run(
                 [sys.executable, str(repo / "organizer.py"), "--no-prompt"],
                 input="",
@@ -576,7 +608,12 @@ class LogDirTests(unittest.TestCase):
             self.assertIn("organizer.log", result.stdout)
             # El log ya no queda dentro de Downloads
             self.assertFalse((downloads / "organizer.log").exists())
-            self.assertTrue((home / ".local" / "share" / "TCS-FileOrganizer" / "organizer.log").exists())
+            expected_log = (
+                appdata / "TCS-FileOrganizer" / "organizer.log"
+                if os.name == "nt"
+                else home / ".local" / "share" / "TCS-FileOrganizer" / "organizer.log"
+            )
+            self.assertTrue(expected_log.exists())
 
 
 class WatcherConfigTests(unittest.TestCase):
