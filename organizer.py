@@ -7,9 +7,10 @@ Uso:
     python organizer.py [carpeta] --dry-run     # Simula sin mover nada
     python organizer.py --config mi_config.toml # Usa config personalizada
 
-Sin carpeta ni --no-prompt, en una terminal interactiva el programa
-pregunta al inicio qué carpeta organizar y qué modo de conflicto usar,
-en vez de organizar Descargas/Downloads sin avisar.
+Sin carpeta ni --no-prompt, el programa pregunta al inicio qué
+carpeta organizar y qué modo de conflicto usar, en vez de organizar
+Descargas/Downloads sin avisar. También pregunta con el botón Run
+de un IDE, donde stdin no es una terminal.
 """
 
 import argparse
@@ -527,7 +528,7 @@ def main():
         choices=sorted(VALID_CONFLICT_MODES),
         default=None,
         help="Modo de conflicto: ask, rename, skip u overwrite. "
-        "Si no se pasa, se pregunta al inicio en terminal interactiva",
+        "Si no se pasa, se pregunta al inicio",
     )
     parser.add_argument(
         "--no-prompt",
@@ -561,26 +562,27 @@ def main():
         print(f"[!] Config no válida: {exc}")
         sys.exit(1)
 
-    # Carpeta a organizar: argumento, o pregunta al inicio en terminal
-    # interactiva. Sin terminal (scripts, tuberías) o con --no-prompt,
-    # se usa la carpeta de Descargas de siempre, sin preguntar.
-    interactive = sys.stdin.isatty() and not args.no_prompt
+    # Carpeta a organizar: argumento, o pregunta al inicio siempre,
+    # también con el botón Run de un IDE (donde stdin no es una
+    # terminal). Solo --no-prompt usa Descargas sin preguntar.
+    # Si no hay de dónde leer la respuesta (EOF), prompt_folder()
+    # sale sin organizar nada, en vez de irse a Descargas en silencio.
     if args.folder:
         folder = Path(args.folder).expanduser().resolve()
-    elif interactive:
-        folder = prompt_folder(_default_downloads_folder())
-    else:
+    elif args.no_prompt:
         folder = _default_downloads_folder()
+    else:
+        folder = prompt_folder(_default_downloads_folder())
 
     if not folder.exists():
         print(f"[!] La carpeta no existe: {folder}")
         sys.exit(1)
 
-    # Modo de conflicto: flag, o pregunta al inicio en terminal
-    # interactiva. Sin terminal o con --no-prompt, se usa el de la config.
+    # Modo de conflicto: flag, o pregunta al inicio. Solo --no-prompt
+    # usa el modo de la config sin preguntar.
     if args.conflict:
         config["conflict"] = args.conflict
-    elif interactive:
+    elif not args.no_prompt:
         config["conflict"] = prompt_conflict_mode(config["conflict"])
 
     log_path = folder / config["log_file"]

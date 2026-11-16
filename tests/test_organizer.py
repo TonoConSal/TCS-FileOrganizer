@@ -4,6 +4,8 @@ Se corren con:
     python -m unittest discover -s tests -v
 """
 import logging
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -283,6 +285,76 @@ class CliPromptTests(unittest.TestCase):
         with mock.patch("organizer.input", side_effect=EOFError):
             with self.assertRaises(SystemExit):
                 prompt_conflict_mode("ask")
+
+    def test_main_prompts_even_when_stdin_is_not_a_tty(self):
+        """El Run de un IDE (stdin por tubería) también debe preguntar.
+
+        Antes, el candado isatty() hacía que sin terminal se fuera
+        directo a Descargas sin preguntar nada.
+        """
+        repo = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            downloads = home / "Downloads"
+            downloads.mkdir(parents=True)
+            (downloads / "decoy.txt").write_text("decoy")
+            chosen = Path(tmp) / "elegida"
+            chosen.mkdir()
+            (chosen / "foto.jpg").write_text("x")
+            env = dict(os.environ, HOME=str(home))
+            result = subprocess.run(
+                [sys.executable, str(repo / "organizer.py")],
+                input=f"{chosen}\nrename\n",
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Carpeta a organizar", result.stdout)
+            self.assertTrue((chosen / "Imágenes" / "foto.jpg").exists())
+            # Descargas quedó intacta: el decoy no se movió
+            self.assertTrue((downloads / "decoy.txt").exists())
+
+    def test_main_eof_exits_without_organizing(self):
+        repo = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            downloads = home / "Downloads"
+            downloads.mkdir(parents=True)
+            (downloads / "decoy.txt").write_text("decoy")
+            env = dict(os.environ, HOME=str(home))
+            result = subprocess.run(
+                [sys.executable, str(repo / "organizer.py")],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Operación cancelada", result.stdout + result.stderr)
+            self.assertTrue((downloads / "decoy.txt").exists())
+
+    def test_main_no_prompt_uses_downloads_without_asking(self):
+        repo = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            downloads = home / "Downloads"
+            downloads.mkdir(parents=True)
+            (downloads / "decoy.txt").write_text("decoy")
+            env = dict(os.environ, HOME=str(home))
+            result = subprocess.run(
+                [sys.executable, str(repo / "organizer.py"), "--no-prompt"],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("Carpeta a organizar", result.stdout)
+            self.assertTrue((downloads / "Documentos" / "decoy.txt").exists())
 
 
 if __name__ == "__main__":
